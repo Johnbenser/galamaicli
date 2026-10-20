@@ -4,42 +4,42 @@ ENDPOINT_REGISTRY = {
         "api_key_env": "CLOUDFLARE_API_TOKEN",
         "models": {
             "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
                 "display_name": "DeepSeek R1 Distill 32B",
                 "context_window": 64000,
                 "supports_streaming": True
             },
             "@cf/qwen/qwen2.5-coder-32b-instruct": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/qwen/qwen2.5-coder-32b-instruct",
                 "display_name": "Qwen 2.5 Coder 32B",
                 "context_window": 32768,
                 "supports_streaming": True
             },
             "@cf/qwen/qwen3.8-27b": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/qwen/qwen3.8-27b",
                 "display_name": "Qwen 3.8 27B CF",
                 "context_window": 32768,
                 "supports_streaming": True
             },
             "@cf/zai-org/glm-4.7-flash": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/zai-org/glm-4.7-flash",
                 "display_name": "GLM 4.7 Flash",
                 "context_window": 128000,
                 "supports_streaming": True
             },
             "@cf/meta/llama-4-scout-17b-16e-instruct": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/meta/llama-4-scout-17b-16e-instruct",
                 "display_name": "Llama 4 Scout 17B",
                 "context_window": 128000,
                 "supports_streaming": True
             },
             "@cf/mistral/mistral-7b-instruct-v0.2-lora": {
-                "route_type": "run",
+                "route_type": "v1",
                 "name": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
                 "display_name": "Mistral 7B LoRA",
                 "context_window": 32768,
@@ -307,6 +307,24 @@ ENDPOINT_REGISTRY = {
                 "context_window": 128000,
                 "supports_streaming": True
             }
+        }
+    },
+    "Agent Router": {
+        "base_url": "https://agentrouter.org/v1",
+        "api_key_env": "AGENT_ROUTER_API_KEY",
+        "routes": {
+            "chat_completions": "https://agentrouter.org/v1/chat/completions",
+            "models": "https://agentrouter.org/v1beta/models",
+            "responses": "https://agentrouter.org/v1/responses",
+            "embeddings": "https://agentrouter.org/v1/embeddings",
+            "messages": "https://agentrouter.org/v1/messages"
+        },
+        "models": {
+            "deepseek-v4-flash": {"name": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash", "supports_streaming": True},
+            "gpt-6-astra": {"name": "gpt-6-astra", "display_name": "GPT 6 Astra", "supports_streaming": True},
+            "gpt-6.1-sol": {"name": "gpt-6.1-sol", "display_name": "GPT 6.1 Sol", "supports_streaming": True},
+            "claude-opus-4-8": {"name": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "supports_streaming": True},
+            "claude-opus-5": {"name": "claude-opus-5", "display_name": "Claude Opus 5", "supports_streaming": True}
         }
     },
     "Local Endpoint": {

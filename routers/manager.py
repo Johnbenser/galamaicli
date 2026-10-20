@@ -15,7 +15,39 @@ from engine.tool_parser import clean_response_text, render_markdown_response
 from engine.logger import log_model_interaction, log_galam_system_event
 from ui.dock_layout import StructuredThoughtStreamHandler, request_user_confirmation
 
+from engine.tool_protocol import options as tool_options, reject_unsupported
+from engine.transparency import ReasoningStream, text_value
+from engine import usage as usage_meter
+from engine.context_manager import estimate_tokens
+from engine.agent_router import client_rejection, ClientAdmissionError, is_agent_router_url
+from engine import cancellation
+
+
+def terminal_quota_error(error):
+    text = str(error).lower()
+    return any(term in text for term in ('resourceexhausted', 'insufficient_quota',
+        'total request limit reached', 'daily limit reached', 'quota exhausted'))
+
 STATS = defaultdict(int)
+
+
+class ProviderStreamError(requests.exceptions.RequestException):
+    """An upstream error delivered inside an otherwise successful HTTP response."""
+
+
+def _raise_provider_error(data):
+    if not isinstance(data, dict):
+        return
+    error = data.get("error") or (data.get("errors") if data.get("success") is False else None)
+    if not error and data.get("type") == "error":
+        error = data.get("message") or "Provider stream failed"
+    if error:
+        detail = (error.get("message") or error.get("detail") or error.get("code")) if isinstance(error, dict) else error
+        diagnosis = client_rejection(CONFIG.get('active_endpoint'),
+            ENDPOINT_REGISTRY.get(CONFIG.get('active_endpoint'), {}).get('base_url', ''), data)
+        if diagnosis:
+            raise ProviderStreamError(diagnosis)
+        raise ProviderStreamError(str(detail or "Provider returned an error")[:1000])
 
 SESSION = requests.Session()
 adapter = HTTPAdapter(pool_connections=15, pool_maxsize=15, max_retries=1)
@@ -28,6 +60,7 @@ def urllib_stream_request(url: str, headers: dict, payload: dict, timeout: int =
     Guarantees resilient connectivity when requests encounters socket/cffi issues in Termux.
     """
     import urllib.request
+    import urllib.error
     import ssl
     clean_headers = {k: v for k, v in headers.items() if k.lower() != "connection"}
     data_bytes = json.dumps(payload).encode("utf-8") if payload else None
@@ -36,9 +69,58 @@ def urllib_stream_request(url: str, headers: dict, payload: dict, timeout: int =
     try:
         ctx = ssl.create_default_context()
         return urllib.request.urlopen(req, timeout=timeout, context=ctx)
-    except Exception:
+    except urllib.error.HTTPError as error:
+        if is_agent_router_url(url):
+            try:
+                data = json.loads(error.read().decode('utf-8', errors='replace'))
+                diagnosis = client_rejection('Agent Router', url, data)
+            except ValueError:
+                diagnosis = ''
+            finally:
+                error.close()
+            if diagnosis:
+                raise ClientAdmissionError(diagnosis) from error
+            raise
         unverified_ctx = ssl._create_unverified_context()
         return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+    except Exception:
+        if is_agent_router_url(url):
+            raise  # Keep certificate verification for Agent Router's fallback transport.
+        unverified_ctx = ssl._create_unverified_context()
+        return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+
+
+def _recorded_post(url, headers, payload, stream_enabled, timeout):
+    model = payload.get('model') or (url.split('/models/',1)[1].split(':',1)[0] if '/models/' in url else CONFIG.get('active_model',''))
+    row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),model,payload,delta='/ai/run/' in url)
+    try:
+        response = cancellation.call(lambda: SESSION.post(url,headers=headers,json=payload,
+            stream=stream_enabled,timeout=timeout), dispose=lambda response: response.close())
+        return usage_meter.attach(response,row)
+    except Exception as error:
+        row['transport_error']=type(error).__name__
+        raise
+
+
+def _recorded_urllib(url,headers,payload,timeout):
+    row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),payload.get('model',CONFIG.get('active_model','')),payload,delta='/ai/run/' in url)
+    try:
+        response = cancellation.call(lambda: urllib_stream_request(url,headers,payload,timeout=timeout),
+            dispose=lambda response: response.close())
+        return usage_meter.attach(response,row)
+    except Exception as error:
+        row['transport_error']=type(error).__name__
+        raise
+
+
+def _response_json(response,is_urllib=False):
+    data = cancellation.call(lambda: json.loads(response.read().decode('utf-8',errors='replace')) if is_urllib else response.json())
+    usage_meter.capture(response,data)
+    row=getattr(response,'_galam_usage_record',{})
+    if isinstance(row,dict):
+        content,reasoning=_extract_response_content(row.get('endpoint',''),row.get('model',''),data)
+        usage_meter.record_output(response,content,reasoning,_detect_and_synthesize_tool_calls('',data))
+    return data
 
 
 def _post_with_transport_retry(url, headers, payload, stream_enabled, read_timeout, local=False):
@@ -47,17 +129,57 @@ def _post_with_transport_retry(url, headers, payload, stream_enabled, read_timeo
     last_error = None
     for attempt in range(attempts):
         try:
-            return SESSION.post(url, headers=headers, json=payload, stream=stream_enabled,
-                                timeout=(6, read_timeout)), False
+            response = _recorded_post(url,headers,payload,stream_enabled,(6,read_timeout))
+            delay = _rate_limit_delay(response)
+            if delay is not None and not AGENT_STATE.get("abort", False):
+                response.close()
+                cancellation.wait(delay)
+                if AGENT_STATE.get("abort", False):
+                    raise requests.exceptions.RequestException("Request cancelled during quota cooldown")
+                response = _recorded_post(url,headers,payload,stream_enabled,(6,read_timeout))
+                response._galam_rate_limit_retried = True
+            return response, False
         except Exception as requests_error:
+            if isinstance(requests_error, cancellation.TaskCancelled):
+                raise
+            if terminal_quota_error(requests_error):
+                raise ProviderStreamError(str(requests_error)) from requests_error
             last_error = requests_error
             try:
-                return urllib_stream_request(url, headers, payload, timeout=read_timeout), True
+                return _recorded_urllib(url,headers,payload,read_timeout), True
             except Exception as urllib_error:
+                if isinstance(urllib_error, cancellation.TaskCancelled):
+                    raise
                 last_error = urllib_error
                 if attempt + 1 < attempts:
                     time.sleep(0.5)
     raise last_error
+
+
+def _rate_limit_delay(response):
+    """One bounded retry of this same request, only when upstream gives a cooldown."""
+    if response.status_code != 429:
+        return None
+    raw = response.headers.get("Retry-After", "")
+    try:
+        delay = float(raw)
+    except (TypeError, ValueError):
+        delay = None
+        if raw:
+            try:
+                from email.utils import parsedate_to_datetime
+                delay = parsedate_to_datetime(raw).timestamp() - time.time()
+            except (ValueError, TypeError, OverflowError):
+                pass
+        if delay is None:
+            try:
+                text = json.dumps(response.json())
+            except (ValueError, TypeError):
+                text = ""
+            match = re.search(r'(?:retryDelay["\s:]+|(?:retry|try again) in\s+)(\d+(?:\.\d+)?)s', text, re.I)
+            if match:
+                delay = float(match.group(1)) + 0.5
+    return max(0.1, delay) if delay is not None and 0 <= delay <= 55 else None
 
 def load_model_rules(model_name: str) -> dict:
     m_lower = model_name.lower()
@@ -144,6 +266,15 @@ def _extract_stream_chunk(chunk_json):
     finish_reason = ""
     if not isinstance(chunk_json, dict):
         return content_delta, reasoning_delta, tool_call_deltas, finish_reason
+    _raise_provider_error(chunk_json)
+
+    # Cohere v2 carries text in delta.message.content rather than choices[].
+    if chunk_json.get("type") == "content-delta":
+        message = chunk_json.get("delta", {}).get("message", {})
+        return text_value(message.get("content", "")), "", [], ""
+    if chunk_json.get("type") == "message-end":
+        reason = chunk_json.get("delta", {}).get("finish_reason", "")
+        return "", "", [], "length" if reason == "MAX_TOKENS" else "stop"
 
     if "candidates" in chunk_json and chunk_json["candidates"]:
         cand = chunk_json["candidates"][0]
@@ -172,12 +303,16 @@ def _extract_stream_chunk(chunk_json):
     data = chunk_json.get("result", chunk_json)
     if not isinstance(data, dict):
         return content_delta, reasoning_delta, tool_call_deltas, finish_reason
+    _raise_provider_error(data)
+
+    if data.get("type") in ("response.reasoning_text.delta", "response.reasoning_summary_text.delta"):
+        return "", text_value(data.get("delta", "")), tool_call_deltas, finish_reason
 
     if data.get("type") == "response.output_text.delta":
         return data.get("delta", ""), "", tool_call_deltas, finish_reason
 
-    if "response" in data and isinstance(data["response"], str):
-        return data["response"], "", tool_call_deltas, finish_reason
+    if "response" in data and isinstance(data["response"], (str, int, float, bool)):
+        return text_value(data["response"]), "", tool_call_deltas, finish_reason
 
     if "choices" in data and data["choices"]:
         choice = data["choices"][0]
@@ -185,12 +320,13 @@ def _extract_stream_chunk(chunk_json):
             finish_reason = choice.get("finish_reason", "") or ""
             delta = choice.get("delta", {})
             if isinstance(delta, dict):
-                content_delta = delta.get("content", "") or ""
+                content_delta = text_value(delta.get("content", ""))
                 reasoning_delta = (
                     delta.get("reasoning_content") or
                     delta.get("reasoning") or
-                    delta.get("thought") or ""
+                    delta.get("thought") or delta.get("reasoning_details") or ""
                 )
+                reasoning_delta = text_value(reasoning_delta)
                 tool_call_deltas = delta.get("tool_calls", []) or []
             elif "text" in choice:
                 content_delta = choice.get("text", "") or ""
@@ -277,6 +413,7 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
 
     if not isinstance(resp_json, dict):
         return "", ""
+    _raise_provider_error(resp_json)
 
     if "candidates" in resp_json and resp_json["candidates"]:
         cand = resp_json["candidates"][0]
@@ -294,6 +431,11 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
     data = resp_json.get("result", resp_json)
     if not isinstance(data, dict):
         return "", ""
+    _raise_provider_error(data)
+
+    if isinstance(data.get("message"), dict):
+        message = data["message"]
+        return text_value(message.get("content", "")).strip(), text_value(message.get("reasoning", "")).strip()
 
     if "output_text" in data and isinstance(data["output_text"], str):
         if data["output_text"].strip():
@@ -307,11 +449,11 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
                 reasoning = (
                     msg.get("reasoning_content") or
                     msg.get("reasoning") or
-                    msg.get("thought") or ""
+                    msg.get("thought") or msg.get("reasoning_details") or ""
                 )
                 content = msg.get("content") or ""
                 if content or reasoning:
-                    return str(content).strip(), str(reasoning).strip()
+                    return text_value(content).strip(), text_value(reasoning).strip()
             if "text" in choice and choice["text"]:
                 return str(choice["text"]).strip(), ""
 
@@ -325,7 +467,9 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
     return "", ""
 
 
-def build_enforced_messages(messages, active_ep, active_m):
+def _legacy_build_enforced_messages(messages, active_ep, active_m, native_tools=True, track_usage=True):
+    from storage.conversations import scoped_messages
+    messages = scoped_messages(messages)
     clean_model_tag = active_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
     rules = load_model_rules(active_m)
     custom_sys = rules.get("system_instruction", "")
@@ -345,9 +489,9 @@ Active runtime: [{active_ep}], model [{clean_model_tag}]. The current user is Jo
 {task_context}
 
 Answer ordinary questions directly. For requested actions, inspect the real workspace and execute the necessary tools; never claim an action ran without its result.
-Use complete calls in this format:
+Use the native tool interface when supplied. Otherwise use complete calls in this format:
 <tool_call>{{"name":"execute_bash","arguments":{{"command":"pwd"}}}}</tool_call>
-Available tools: execute_bash(command,reason), view_file(path,start_line,end_line), search_files(query,directory), write_file(path,content,overwrite), replace_file_content(path,target_content,replacement_content), manage_tasks(action,target).
+Available tools: make_directory(path), execute_bash(command,reason), view_file(path,start_line,end_line), search_files(query,directory), write_file(path,content,overwrite), replace_file_content(path,target_content,replacement_content), manage_tasks(action,target).
 For navigation use cd; never create a directory merely because the user asked to go there. For 'go to PATH then COMMAND' use 'cd PATH && COMMAND'. Inspect package.json or existing entrypoints before starting a project server.
 For building or creating code, use write_file(path,content) with actual implementation, not touch or an empty placeholder. Use execute_bash for commands and checks; a successful mkdir/touch does not complete a content request.
 Inspect existing source before editing, preserve unrelated code, and use unique search/replace blocks for focused changes. After tool results, acknowledge the actual outcome and continue with the next needed action until the request is satisfied.
@@ -372,13 +516,76 @@ If an action fails, use its real error to choose a corrective step. Keep unfinis
                         "After an edit, run relevant project checks when available. A saved file is not proof "
                         "that tests passed. Keep unfinished work explicit. Bash examples are not actions.")
     from engine.context_manager import assemble_context
-    enforced, usage = assemble_context(messages, identity_prompt, active_ep, active_m, CONFIG, working_directory)
-    AGENT_STATE["context_usage"] = usage
+    from engine.context_manager import estimate_tokens
+    protocol = tool_options(active_ep, active_m, messages, CONFIG) if native_tools else {}
+    context_config = {**CONFIG, "_tool_schema_tokens": estimate_tokens(protocol) + 16 if protocol else 0}
+    if protocol:
+        from engine.task_contract import TaskContract
+        from engine.context_manager import latest_request
+        contract = TaskContract(latest_request(messages), working_directory)
+        if contract.complete_scope:
+            context_config["_simple_filesystem"] = True
+            identity_prompt = (f"You are Galam.ai, John Benser's terminal assistant. Endpoint: {active_ep}. "
+                               f"Current directory: {working_directory}.\n{custom_sys}\n"
+                               "The request names explicit filesystem outputs. Preserve requested content and file/directory types. "
+                               "Use make_directory for folders and write_file for complete file content. Inspect existing files before edits. "
+                               "A tool result describes an action already executed; do not repeat it or make unrelated changes. "
+                               "Only report completion after every requested output is verified. A saved file does not prove tests passed.\n"
+                               "Named outputs still missing or mismatched: " + ("; ".join(contract.missing()) or "none"))
+        identity_prompt += ("\nNATIVE TOOL PROTOCOL: Prefer the supplied function interface over text/XML wrappers. "
+                            "Do not duplicate a native call in prose. Tool results report actions already executed. "
+                            "When the user requirements are satisfied, return a concise final answer without further edits.")
+        from engine.tool_protocol import wire_messages
+        context_messages = wire_messages(messages)
+    else:
+        context_messages = [m for m in messages if m.get("content") or not m.get("_galam_tool_calls")]
+    from engine.action_instructions import response_contract
+    from engine.action_results import request_intent
+    from engine.context_manager import latest_request
+    if request_intent(latest_request(messages))[0]:
+        identity_prompt += response_contract(native=bool(protocol))
+    enforced, usage = assemble_context(context_messages, identity_prompt, active_ep, active_m, context_config, working_directory)
+    if track_usage:
+        AGENT_STATE["context_usage"] = usage
     return enforced
 
 
 
+def build_enforced_messages(messages, active_ep, active_m, native_tools=True, track_usage=True):
+    from engine.token_policy import enabled
+    if not enabled(CONFIG, 'prompts'):
+        return _legacy_build_enforced_messages(messages, active_ep, active_m, native_tools, track_usage)
+    from storage.conversations import scoped_messages
+    from engine.context_manager import assemble_context, estimate_tokens, latest_request, contextual_action
+    from engine.action_results import request_intent
+    from engine.action_instructions import response_contract
+    from engine.prompt_context import identity
+    from engine.task_runner import GLOBAL_TASK_MANAGER, workspace_snapshot
+    from engine.tool_protocol import wire_messages, wire_text_messages
+    messages = scoped_messages(messages)
+    query = latest_request(messages)
+    action = contextual_action(messages) or any(m.get('_galam_tool_mode') == 'required' for m in messages[-2:])
+    directory = AGENT_STATE.get('working_directory') or os.getcwd()
+    workspace = action or bool(re.search(r'current (?:directory|folder)|\b(?:my|this|our) (?:project|repo|code|files|folder)\b', query, re.I))
+    snapshot = workspace_snapshot(directory, limit=16) if workspace else ''
+    if not re.search(r'\b(?:go|navigate|find|directory|folder|cd)\b', query, re.I):
+        snapshot = snapshot.split('\nNearby directories:', 1)[0]
+    protocol = tool_options(active_ep, active_m, messages, CONFIG) if native_tools else {}
+    prompt = identity(active_ep, active_m, load_model_rules(active_m).get('system_instruction',''),
+                      action, directory, snapshot, GLOBAL_TASK_MANAGER.get_active_tasks() if action else ())
+    if action:
+        prompt += response_contract(bool(protocol))
+    context_config = dict(CONFIG, _tool_schema_tokens=estimate_tokens(protocol)+16 if protocol else 0)
+    context_messages = wire_messages(messages) if protocol else wire_text_messages(messages)
+    enforced, usage = assemble_context(context_messages, prompt, active_ep, active_m, context_config, directory)
+    if track_usage:
+        AGENT_STATE['context_usage'] = usage
+    return enforced
+
+
 def query_subagent(messages: list) -> str:
+    from storage.conversations import scoped_messages
+    messages = scoped_messages(messages)
     stream_enabled = CONFIG.get("stream", True)
     active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", "Direct")
     active_m = CONFIG.get("active_model") or CONFIG.get("model", "gemini-3.5-flash")
@@ -388,13 +595,13 @@ def query_subagent(messages: list) -> str:
         advertised = refresh_local_models(CONFIG)
         if advertised and active_m not in advertised:
             active_m = advertised[0]
-            save_settings(active_model=active_m, model=active_m)
 
     models_in_ep = list(ENDPOINT_REGISTRY[active_ep]["models"].keys())
     ordered_models = [active_m] + [m for m in models_in_ep if m != active_m]
 
     for model_name in ordered_models:
-        enforced_msgs = build_enforced_messages(messages, active_ep, model_name)
+        enforced_msgs = build_enforced_messages(messages, active_ep, model_name, native_tools=False, track_usage=False)
+        resp = None
         try:
             url, headers, payload = build_request_data(
                 endpoint_name=active_ep,
@@ -412,14 +619,27 @@ def query_subagent(messages: list) -> str:
                     payload["reasoning"] = rules["reasoning"]
 
             read_timeout = max(90, rules.get("timeout", 60)) if active_ep == "Local Endpoint" else 20
-            resp = SESSION.post(url, headers=headers, json=payload,
-                                stream=stream_enabled, timeout=(4, read_timeout))
+            resp = _recorded_post(url,headers,payload,stream_enabled,(4,read_timeout))
             if not resp.ok:
+                try:
+                    error_body = resp.json()
+                    diagnosis = client_rejection(active_ep, url, error_body)
+                except ValueError:
+                    diagnosis, error_body = '', {}
+                if diagnosis:
+                    resp.close()
+                    return diagnosis
+                if terminal_quota_error(error_body):
+                    resp.close()
+                    return '/btw stopped: request quota exhausted.'
                 continue
 
             full_content = ""
+            from engine.transparency import begin_generation, append_reasoning
+            reasoning_row = begin_generation(model_name + " (side request)")
+            splitter = ReasoningStream()
             if stream_enabled and "text/event-stream" in resp.headers.get("Content-Type", ""):
-                for line in resp.iter_lines():
+                for line in cancellation.lines(resp.iter_lines(), close=getattr(resp, "close", None)):
                     if not line:
                         continue
                     decoded = line.decode("utf-8").strip()
@@ -429,37 +649,66 @@ def query_subagent(messages: list) -> str:
                             break
                         try:
                             chunk_json = json.loads(raw_chunk)
-                            c_tok, _, _, _ = _extract_stream_chunk(chunk_json)
-                            if "<think>" in c_tok:
-                                c_tok = c_tok.split("<think>", 1)[0]
-                            if "</think>" in c_tok:
-                                c_tok = c_tok.split("</think>", 1)[-1]
+                            usage_meter.capture(resp,chunk_json)
+                            c_tok, r_tok, side_tools, _ = _extract_stream_chunk(chunk_json)
+                            usage_meter.record_output(resp,c_tok,r_tok,side_tools)
+                            c_tok, r_tok = splitter.feed(c_tok, r_tok)
                             full_content += c_tok
+                            if r_tok:
+                                append_reasoning(reasoning_row, r_tok, update_summary=False)
+                        except ProviderStreamError:
+                            raise
                         except Exception:
                             continue
             else:
-                resp_json = resp.json()
-                full_content, _ = _extract_response_content(active_ep, model_name, resp_json)
+                resp_json = _response_json(resp)
+                full_content, r_tok = _extract_response_content(active_ep, model_name, resp_json)
+                full_content, r_tok = splitter.feed(full_content, r_tok)
+                if r_tok:
+                    append_reasoning(reasoning_row, r_tok, update_summary=False)
+            tail, r_tail = splitter.feed(final=True)
+            full_content += tail
+            if r_tail:
+                append_reasoning(reasoning_row, r_tail, update_summary=False)
 
             if full_content.strip():
                 return full_content.strip()
 
+        except requests.exceptions.RequestException as error:
+            if isinstance(error,cancellation.TaskCancelled):
+                raise
+            if terminal_quota_error(error):
+                return '/btw stopped: request quota exhausted.'
+            diagnosis = client_rejection(active_ep, url, str(error))
+            if diagnosis:
+                return diagnosis
+            continue
         except Exception:
             continue
+        finally:
+            if resp is not None and hasattr(resp,'close'):
+                resp.close()
 
     return "Sub-agent could not complete query under active endpoint."
 
 
 def query_with_fallback(*args, **kwargs):
+    visited = set(kwargs.pop('_visited_endpoints', ()))
     raw_messages = kwargs.get("messages")
     if raw_messages is None and len(args) > 0:
         raw_messages = args[0]
     if raw_messages is None:
         raw_messages = []
+    from storage.conversations import scoped_messages
+    raw_messages = scoped_messages(raw_messages)
+    usage_start = len(usage_meter.ledger()['requests'])
 
     stream_enabled = CONFIG.get("stream", True)
     active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", "Direct")
     active_m = CONFIG.get("active_model") or CONFIG.get("model", "gemini-3.5-flash")
+    if active_ep in visited:
+        return 'EXHAUSTED', active_m
+    visited.add(active_ep)
 
     if active_ep == "Local Endpoint":
         from engine.local_models import refresh_local_models
@@ -485,7 +734,7 @@ def query_with_fallback(*args, **kwargs):
         messages = build_enforced_messages(raw_messages, active_ep, model_name)
         request_context_usage = dict(AGENT_STATE.get("context_usage", {}))
         thought_ui = StructuredThoughtStreamHandler(model_tag=clean_model_tag)
-        thought_ui.show_spinner("Connecting to model...")
+        thought_ui.show_spinner("Waiting for model response…")
 
         try:
             url, headers, payload = build_request_data(
@@ -494,6 +743,7 @@ def query_with_fallback(*args, **kwargs):
                 messages=messages,
                 stream=stream_enabled
             )
+            payload.update(tool_options(active_ep, model_name, raw_messages, CONFIG))
             headers["Connection"] = "keep-alive"
 
             rules = load_model_rules(model_name)
@@ -519,6 +769,17 @@ def query_with_fallback(*args, **kwargs):
                     local=active_ep == "Local Endpoint",
                 )
             except Exception as conn_err:
+                if isinstance(conn_err, cancellation.TaskCancelled):
+                    return 'CANCELLED', active_m
+                if terminal_quota_error(conn_err):
+                    sys.stdout.write(f'\n[!] Request quota exhausted: {conn_err}. Task stopped.\n')
+                    sys.stdout.flush()
+                    return 'FAILED', active_m
+                if isinstance(conn_err, ClientAdmissionError):
+                    thought_ui.clear()
+                    sys.stdout.write(f'\n[!] {conn_err}\n')
+                    sys.stdout.flush()
+                    return 'FAILED', active_m
                 if active_ep == "Local Endpoint":
                     from engine.local_server import ensure_local_server
                     started, start_message = ensure_local_server(url.rsplit("/chat/completions", 1)[0])
@@ -566,18 +827,42 @@ def query_with_fallback(*args, **kwargs):
                 sys.stdout.flush()
                 break
 
+            if not is_urllib and reject_unsupported(resp, active_ep, model_name, CONFIG, payload):
+                if hasattr(resp, "close"):
+                    resp.close()
+                payload.pop("tools", None)
+                payload.pop("tool_choice", None)
+                payload["messages"] = build_enforced_messages(raw_messages, active_ep, model_name)
+                thought_ui.show_spinner("Using the text tool protocol")
+                resp, is_urllib = _post_with_transport_retry(url, headers, payload, stream_enabled, read_timeout,
+                                                            local=active_ep == "Local Endpoint")
+
             if not is_urllib and not resp.ok:
                 thought_ui.clear()
                 AGENT_STATE["is_streaming"] = False
                 sc = resp.status_code
                 err_detail = ""
+                err_json = {}
                 try:
                     err_json = resp.json()
-                    err_detail = err_json.get("error", {}).get("message") or err_json.get("message", "")
+                    error = err_json.get('error') or {}
+                    err_detail = (error.get('message') if isinstance(error, dict) else str(error)) or err_json.get('message', '')
                 except Exception:
                     pass
                 if not err_detail and resp.text:
                     err_detail = resp.text.strip()[:100]
+
+                diagnosis = client_rejection(active_ep, url, err_json or err_detail)
+                if diagnosis:
+                    sys.stdout.write(f'\n[!] HTTP {sc}: {diagnosis}\n')
+                    sys.stdout.flush()
+                    resp.close()
+                    return 'FAILED', active_m
+                if terminal_quota_error(err_detail):
+                    sys.stdout.write(f'\n[!] Request quota exhausted (HTTP {sc}): {err_detail}. Task stopped.\n')
+                    sys.stdout.flush()
+                    resp.close()
+                    return 'FAILED', active_m
 
                 if sc == 400 and ("context size" in err_detail.lower() or "exceeds" in err_detail.lower()):
                     status_desc = f"HTTP 400 - Context limit exceeded ({err_detail})"
@@ -626,6 +911,7 @@ def query_with_fallback(*args, **kwargs):
 
             full_content = ""
             full_reasoning = ""
+            reasoning_stream = ReasoningStream()
             streamed_tool_calls = {}
             resp_json = None
             last_finish_reason = ""
@@ -634,7 +920,7 @@ def query_with_fallback(*args, **kwargs):
             c_type = resp.headers.get("Content-Type", "") if hasattr(resp, "headers") else (resp.info().get("Content-Type", "") if hasattr(resp, "info") else "")
             if stream_enabled and "text/event-stream" in c_type:
                 try:
-                    line_iter = resp if is_urllib else resp.iter_lines()
+                    line_iter = cancellation.lines(resp if is_urllib else resp.iter_lines(), close=getattr(resp, "close", None))
                     for line in line_iter:
                         if AGENT_STATE.get("abort", False):
                             thought_ui.clear()
@@ -651,11 +937,15 @@ def query_with_fallback(*args, **kwargs):
                                 break
                             try:
                                 chunk_json = json.loads(raw_chunk)
+                                usage_meter.capture(resp,chunk_json)
                                 c_tok, r_tok, tc_deltas, f_reason = _extract_stream_chunk(chunk_json)
+                                usage_meter.record_output(resp,c_tok,r_tok,tc_deltas)
                                 if f_reason:
                                     last_finish_reason = f_reason
 
                                 # Accumulate streamed tool calls (native OpenAI/OpenRouter stream format)
+                                if tc_deltas:
+                                    thought_ui.show_spinner("Receiving structured action arguments…")
                                 for tc in tc_deltas:
                                     idx = tc.get("index", 0)
                                     if idx not in streamed_tool_calls:
@@ -670,20 +960,7 @@ def query_with_fallback(*args, **kwargs):
                                     if fn.get("arguments"):
                                         streamed_tool_calls[idx]["function"]["arguments"] += fn["arguments"]
 
-                                if "<think>" in c_tok:
-                                    parts = c_tok.split("<think>", 1)
-                                    c_tok = parts[0]
-                                    r_tok = parts[1]
-
-                                if "</think>" in (c_tok or r_tok):
-                                    target = c_tok if "</think>" in c_tok else r_tok
-                                    parts = target.split("</think>", 1)
-                                    if "</think>" in r_tok:
-                                        r_tok = parts[0]
-                                        c_tok = parts[1]
-                                    else:
-                                        r_tok = parts[0]
-                                        c_tok = parts[1]
+                                c_tok, r_tok = reasoning_stream.feed(c_tok, r_tok)
 
                                 if r_tok:
                                     thought_ui.update_thought(r_tok)
@@ -693,20 +970,29 @@ def query_with_fallback(*args, **kwargs):
                                     full_content += c_tok
                                     thought_ui.show_spinner("Responding...")
 
+                            except ProviderStreamError:
+                                raise
                             except Exception:
                                 continue
 
+                except cancellation.TaskCancelled:
+                    raise
                 except Exception as stream_error:
+                    if isinstance(stream_error, ProviderStreamError):
+                        raise
                     log_galam_system_event(
                         event_type="MODEL_STREAM_ERROR",
                         summary=f"Stream interrupted for {model_name}: {stream_error}",
                         details={"endpoint": active_ep, "model": model_name, "error": str(stream_error)},
                     )
 
+                if reasoning_stream.in_reasoning or reasoning_stream.pending:
+                    last_finish_reason = "length"
                 thought_ui.clear()
                 AGENT_STATE["is_streaming"] = False
 
-                if not full_content and not streamed_tool_calls:
+                if (not full_content and not full_reasoning and not streamed_tool_calls
+                        and not reasoning_stream.in_reasoning and not reasoning_stream.pending):
                     # A local stream can close before sending any tokens. Retry once
                     # without streaming before giving up on this user request.
                     if active_ep == "Local Endpoint" and not AGENT_STATE.get("abort", False):
@@ -716,8 +1002,7 @@ def query_with_fallback(*args, **kwargs):
                             retry_resp, retry_urllib = _post_with_transport_retry(
                                 url, headers, retry_payload, False, read_timeout, local=True,
                             )
-                            retry_json = (json.loads(retry_resp.read().decode("utf-8", errors="replace"))
-                                          if retry_urllib else retry_resp.json())
+                            retry_json = _response_json(retry_resp,retry_urllib)
                             resp_json = retry_json
                             full_content, full_reasoning = _extract_response_content(active_ep, model_name, retry_json)
                         except Exception as retry_error:
@@ -729,7 +1014,7 @@ def query_with_fallback(*args, **kwargs):
                         continue
 
             else:
-                resp_json = json.loads(resp.read().decode("utf-8", errors="replace")) if is_urllib else resp.json()
+                resp_json = _response_json(resp,is_urllib)
                 thought_ui.clear()
                 AGENT_STATE["is_streaming"] = False
                 full_content, full_reasoning = _extract_response_content(active_ep, model_name, resp_json)
@@ -772,6 +1057,7 @@ def query_with_fallback(*args, **kwargs):
                         messages=c_enforced,
                         stream=stream_enabled
                     )
+                    c_payload.update(tool_options(active_ep, model_name, raw_messages, CONFIG))
                     c_headers["Connection"] = "keep-alive"
                     if isinstance(c_payload, dict):
                         if "chat_template_kwargs" in rules:
@@ -782,10 +1068,10 @@ def query_with_fallback(*args, **kwargs):
                     c_resp = None
                     c_is_urllib = False
                     try:
-                        c_resp = SESSION.post(c_url, headers=c_headers, json=c_payload, stream=stream_enabled, timeout=(6, read_timeout))
+                        c_resp = _recorded_post(c_url,c_headers,c_payload,stream_enabled,(6,read_timeout))
                     except Exception:
                         try:
-                            c_resp = urllib_stream_request(c_url, c_headers, c_payload, timeout=read_timeout)
+                            c_resp = _recorded_urllib(c_url,c_headers,c_payload,read_timeout)
                             c_is_urllib = True
                         except Exception:
                             break
@@ -796,7 +1082,7 @@ def query_with_fallback(*args, **kwargs):
                     c_type_cont = c_resp.headers.get("Content-Type", "") if hasattr(c_resp, "headers") else (c_resp.info().get("Content-Type", "") if hasattr(c_resp, "info") else "")
                     last_finish_reason = "stop"
                     if stream_enabled and "text/event-stream" in c_type_cont:
-                        c_line_iter = c_resp if c_is_urllib else c_resp.iter_lines()
+                        c_line_iter = cancellation.lines(c_resp if c_is_urllib else c_resp.iter_lines(), close=getattr(c_resp, "close", None))
                         for c_line in c_line_iter:
                             if AGENT_STATE.get("abort", False):
                                 break
@@ -809,10 +1095,14 @@ def query_with_fallback(*args, **kwargs):
                                     break
                                 try:
                                     c_chunk_json = json.loads(c_raw)
+                                    usage_meter.capture(c_resp,c_chunk_json)
                                     c_c_tok, c_r_tok, c_tc_deltas, c_f_reason = _extract_stream_chunk(c_chunk_json)
+                                    usage_meter.record_output(c_resp,c_c_tok,c_r_tok,c_tc_deltas)
                                     if c_f_reason:
                                         last_finish_reason = c_f_reason
 
+                                    if c_tc_deltas:
+                                        thought_ui.show_spinner("Receiving structured action arguments…")
                                     for tc in c_tc_deltas:
                                         idx = tc.get("index", 0)
                                         if idx not in streamed_tool_calls:
@@ -827,19 +1117,7 @@ def query_with_fallback(*args, **kwargs):
                                         if fn.get("arguments"):
                                             streamed_tool_calls[idx]["function"]["arguments"] += fn["arguments"]
 
-                                    if "<think>" in c_c_tok:
-                                        p_tok = c_c_tok.split("<think>", 1)
-                                        c_c_tok = p_tok[0]
-                                        c_r_tok = p_tok[1]
-                                    if "</think>" in (c_c_tok or c_r_tok):
-                                        target = c_c_tok if "</think>" in c_c_tok else c_r_tok
-                                        p_tok = target.split("</think>", 1)
-                                        if "</think>" in c_r_tok:
-                                            c_r_tok = p_tok[0]
-                                            c_c_tok = p_tok[1]
-                                        else:
-                                            c_r_tok = p_tok[0]
-                                            c_c_tok = p_tok[1]
+                                    c_c_tok, c_r_tok = reasoning_stream.feed(c_c_tok, c_r_tok)
 
                                     if c_r_tok:
                                         thought_ui.update_thought(c_r_tok)
@@ -848,10 +1126,12 @@ def query_with_fallback(*args, **kwargs):
                                     if c_c_tok:
                                         full_content += c_c_tok
                                         thought_ui.show_spinner("Continuing response...")
+                                except ProviderStreamError:
+                                    raise
                                 except Exception:
                                     continue
                     else:
-                        c_resp_json = json.loads(c_resp.read().decode("utf-8", errors="replace")) if c_is_urllib else c_resp.json()
+                        c_resp_json = _response_json(c_resp,c_is_urllib)
                         if _detect_and_synthesize_tool_calls("", c_resp_json):
                             resp_json = c_resp_json
                         c_part, r_part = _extract_response_content(active_ep, model_name, c_resp_json)
@@ -860,12 +1140,22 @@ def query_with_fallback(*args, **kwargs):
                         if r_part:
                             full_reasoning += ("\n\n" + r_part) if full_reasoning else r_part
                         last_finish_reason = "stop"
+                except cancellation.TaskCancelled:
+                    raise
+                except ProviderStreamError:
+                    raise
                 except Exception:
                     break
                 finally:
                     thought_ui.clear()
                     AGENT_STATE["is_streaming"] = False
 
+
+            tail_content, tail_reason = reasoning_stream.feed(final=True)
+            full_content += tail_content
+            full_reasoning += tail_reason
+            if tail_reason:
+                thought_ui.update_thought(tail_reason)
 
             # Assemble streamed tools if any were accumulated
             final_streamed_tools = []
@@ -890,6 +1180,28 @@ def query_with_fallback(*args, **kwargs):
                     })
 
             json_tools = _detect_and_synthesize_tool_calls("", resp_json) if resp_json else []
+            if last_finish_reason in ("tool_calls", "function_call") and not final_streamed_tools and not json_tools:
+                # Some providers finish a stream with tool_calls but omit the
+                # call/argument deltas. No action has run: retrieve one complete
+                # response from the same model instead of treating reasoning as
+                # an action or asking it to repeat its plan.
+                thought_ui.show_spinner("Retrieving the complete structured action…")
+                if hasattr(resp, "close"):
+                    resp.close()
+                retry_payload = dict(payload, stream=False)
+                retry_resp, retry_urllib = _post_with_transport_retry(
+                    url, headers, retry_payload, False, read_timeout,
+                    local=active_ep == "Local Endpoint")
+                if not retry_urllib and not retry_resp.ok:
+                    raise requests.exceptions.RequestException(
+                        f"Structured action retry failed (HTTP {retry_resp.status_code})")
+                resp_json = _response_json(retry_resp,retry_urllib)
+                retry_content, retry_reason = _extract_response_content(active_ep, model_name, resp_json)
+                if retry_content:
+                    full_content = retry_content
+                if retry_reason:
+                    full_reasoning = (full_reasoning + "\n\n" + retry_reason).strip()
+                json_tools = _detect_and_synthesize_tool_calls("", resp_json)
             if not full_content.strip() and not full_reasoning.strip() and not final_streamed_tools and not json_tools:
                 continue
 
@@ -899,6 +1211,9 @@ def query_with_fallback(*args, **kwargs):
             if parsed_reason:
                 full_reasoning = (full_reasoning + "\n\n" + parsed_reason).strip()
                 full_content = clean_body
+
+            thought_ui.complete_reasoning(full_reasoning)
+            thought_ui.clear()
 
             # If full_content is empty (because the entire stream was classified as reasoning)
             # and no tool call is detected, ensure the AI is never silent:
@@ -954,7 +1269,10 @@ def query_with_fallback(*args, **kwargs):
                 },
                 redundancies=redundancies,
                 improvements=improvements,
-                metadata={"tokens_approx": len(full_content) // 4, "context_budget": request_context_usage}
+                metadata={"tokens_approx": len(full_content) // 4, "context_budget": request_context_usage,
+                          "usage": usage_meter.snapshot(usage_start),
+                          "estimated_generated_tokens": estimate_tokens(
+                              full_content+full_reasoning+json.dumps(tool_calls))}
             )
 
             save_settings(active_model=model_name, model=model_name)
@@ -970,6 +1288,20 @@ def query_with_fallback(*args, **kwargs):
 
         except requests.exceptions.RequestException as req_err:
             thought_ui.clear()
+            if isinstance(req_err, cancellation.TaskCancelled):
+                return 'CANCELLED', active_m
+            if terminal_quota_error(req_err):
+                sys.stdout.write(f'\n[!] Request quota exhausted: {req_err}. Task stopped.\n')
+                sys.stdout.flush()
+                return 'FAILED', active_m
+            diagnosis = client_rejection(active_ep, url if 'url' in locals() else '', str(req_err))
+            if diagnosis:
+                AGENT_STATE['is_streaming'] = False
+                sys.stdout.write(f'\n[!] {diagnosis}\n')
+                sys.stdout.flush()
+                if resp is not None and hasattr(resp, 'close'):
+                    resp.close()
+                return 'FAILED', active_m
             req_duration_ms = (time.time() - req_start_time) * 1000.0 if 'req_start_time' in locals() else 0
             log_model_interaction(
                 model_name=model_name,
@@ -1004,7 +1336,7 @@ def query_with_fallback(*args, **kwargs):
         return "FAILED", active_m
 
     fallback_policy = CONFIG.get("fallback_policy", "ask").lower()
-    available_endpoints = [ep for ep in list(ENDPOINT_REGISTRY.keys()) if ep != active_ep]
+    available_endpoints = [ep for ep in list(ENDPOINT_REGISTRY.keys()) if ep not in visited]
 
     def _has_key_for(ep):
         if ep == "Local Endpoint":
@@ -1054,7 +1386,7 @@ def query_with_fallback(*args, **kwargs):
             save_settings(active_endpoint=new_ep, endpoint=new_ep, active_model=first_model, model=first_model)
             sys.stdout.write(f"\n\033[1;32m[✓] Switching active endpoint to [{new_ep}] -> {first_model}...\033[0m\n\n")
             sys.stdout.flush()
-            return query_with_fallback(*args, **kwargs)
+            return query_with_fallback(*args, _visited_endpoints=visited, **kwargs)
 
     sys.stdout.write(f"\n\033[1;31m[!] Transparency Report: All models under [{active_ep}] failed or timed out.\033[0m\n")
     from engine.payload_builder import get_endpoint_api_key

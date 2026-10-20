@@ -1,6 +1,7 @@
 """One lightweight argument contract shared by the existing execution paths."""
 
 TOOLS = {
+    "make_directory": {"path": str},
     "execute_bash": {"command": str, "reason": str},
     "view_file": {"path": str, "start_line": int, "end_line": int},
     "write_file": {"path": str, "content": str, "overwrite": bool},
@@ -11,6 +12,7 @@ TOOLS = {
     "undo_file_change": {"edit_id": str},
 }
 REQUIRED = {
+    "make_directory": ("path",),
     "execute_bash": ("command",), "view_file": ("path",),
     "write_file": ("path", "content"),
     "replace_file_content": ("path", "target_content", "replacement_content"),

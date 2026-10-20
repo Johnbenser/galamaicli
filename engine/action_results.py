@@ -59,7 +59,7 @@ def request_intent(text):
     explicit_next_action = re.search(r"\b(?:and|then)\s+(?:run|execute|fix|edit|modify|create)\b", cleaned, re.I)
     if explanation and not explicit_next_action:
         return False, False
-    action = bool(re.search(r"\b(?:create|write|make|build|edit|modify|update|change|fix|refactor|remove|rename|touch|mkdir|run|start|open|inspect|read|list|search)\b|go to", cleaned, re.I))
+    action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|open|inspect|read|list|search)\b|go to", cleaned, re.I))
     mutation = bool(re.search(r"\b(?:edit|modify|update|change|fix|refactor|rewrite)\b", cleaned, re.I)) or requires_content(cleaned)
     code = bool(re.search(r"\b(?:code|file|script|app|function|class|page|site|css|html|py|js|json)\b|\.(?:py|jsx?|tsx?|json|css|html)\b", cleaned, re.I))
     navigation = bool(re.search(r"\b(?:directory|folder|mode|model|endpoint|settings|working directory)\b", cleaned, re.I))

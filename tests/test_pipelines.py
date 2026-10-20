@@ -426,11 +426,11 @@ class LoopTests(Workspace):
         self.assertEqual([call.args[0] for call in spy.call_args_list], ["write_file", "execute_bash"])
         self.assertIn("1 configured check(s) passed", messages[-1]["content"])
 
-    def test_fast_acknowledgment_does_not_stop_a_multi_file_request(self):
+    def test_fast_acknowledgment_waits_for_both_requested_files(self):
         responses = [self.response("write_file", {"path": "a.txt", "content": ""}),
                      self.response("write_file", {"path": "b.txt", "content": ""}), self.response(text="Created both files.")]
         messages, spy = self.run_loop(responses, "Create a.txt then create b.txt")
-        self.assertEqual(self.model_calls, 3)
+        self.assertEqual(self.model_calls, 2)
         self.assertTrue((self.root / "a.txt").is_file())
         self.assertTrue((self.root / "b.txt").is_file())
 

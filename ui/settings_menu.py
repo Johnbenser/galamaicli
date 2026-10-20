@@ -18,6 +18,8 @@ class InlineSettingsApp:
         if self.selected_ep == "Local Endpoint" and initial_screen == "models":
             from engine.local_models import refresh_local_models
             refresh_local_models(CONFIG)
+        from engine.local_ui import LocalScreens
+        self.local_screens = LocalScreens(CONFIG, save_settings)
         self.cursor_idx = 0
         self.kb = KeyBindings()
         self._setup_bindings()
@@ -31,7 +33,7 @@ class InlineSettingsApp:
         stream = "ON" if CONFIG.get("stream", True) else "OFF"
 
         if self.screen == "main":
-            return [
+            items = [
                 {"label": "Active Endpoint", "hint": f"[{active_ep}]", "action": "to_endpoints"},
                 {"label": "Active Model",    "hint": f"[{clean_m}]",  "action": "to_models"},
                 {"label": "Execution Mode",   "hint": f"[{mode}]",     "action": "toggle_mode"},
@@ -39,6 +41,9 @@ class InlineSettingsApp:
                 {"label": "Stream Output",    "hint": f"[{stream}]",   "action": "toggle_stream"},
                 {"label": "Back to Chat",     "hint": "",              "action": "exit"}
             ]
+            if CONFIG.get("local_manager", True) is not False:
+                items.insert(-1, self.local_screens.main_item())
+            return items
         elif self.screen == "endpoints":
             eps = list(ENDPOINT_REGISTRY.keys())
             return [
@@ -58,6 +63,8 @@ class InlineSettingsApp:
                 }
                 for m in models
             ]
+        elif self.screen in ("local", "local_add", "local_result"):
+            return self.local_screens.items(self.screen)
         return []
 
     def _setup_bindings(self):
@@ -111,6 +118,9 @@ class InlineSettingsApp:
                     cur = CONFIG.get("stream", True)
                     save_settings(stream=not cur)
                     CONFIG["stream"] = not cur
+                elif act == "to_local":
+                    self.screen = "local"
+                    self.cursor_idx = 0
                 elif act == "exit":
                     event.app.exit()
 
@@ -145,13 +155,26 @@ class InlineSettingsApp:
                     self.screen = "main"
                     self.cursor_idx = 1
 
+            elif self.screen in ("local", "local_add", "local_result"):
+                destination = self.local_screens.enter(item, event.app.invalidate)
+                if item.get("action") in ("local_activate", "local_add_profile"):
+                    self.selected_ep = CONFIG.get("active_endpoint", self.selected_ep)
+                if destination:
+                    self.screen = destination
+                    self.cursor_idx = 0
+
             event.app.invalidate()
 
         @self.kb.add('escape')
         @self.kb.add('q')
         @self.kb.add('c-c')
         def _back(event):
-            if self.screen != "main" and self.initial_screen != "models":
+            if self.screen in ("local_add", "local_result"):
+                self.local_screens.enter({"action": "local_back"}, event.app.invalidate)
+                self.screen = "local"
+                self.cursor_idx = 0
+                event.app.invalidate()
+            elif self.screen != "main" and self.initial_screen != "models":
                 self.screen = "main"
                 self.cursor_idx = 0
                 event.app.invalidate()
@@ -164,6 +187,8 @@ class InlineSettingsApp:
             title = "Galam.AI Settings"
         elif self.screen == "endpoints":
             title = "Select Endpoint"
+        elif self.screen in ("local", "local_add", "local_result"):
+            title = {"local": "Local Models", "local_add": "Select GGUF", "local_result": "Local Model Status"}[self.screen]
         else:
             title = f"Select Model [{self.selected_ep}]"
 

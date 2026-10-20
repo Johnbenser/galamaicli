@@ -24,6 +24,12 @@ def _healthy(base_url: str) -> bool:
 
 def ensure_local_server(base_url: str) -> tuple[bool, str]:
     """Start a known local server only for a loopback endpoint."""
+    from config import CONFIG
+    from engine.local_profiles import enabled, selected_profile
+    profile = selected_profile(CONFIG) if enabled(CONFIG) else None
+    if profile:
+        from engine.local_process import start_profile
+        return start_profile(profile, {**CONFIG, "local_endpoint_url": base_url})
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
         return False, "Automatic start applies only to a local HTTP endpoint."
@@ -52,6 +58,13 @@ def ensure_local_server(base_url: str) -> tuple[bool, str]:
                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                     close_fds=True, start_new_session=True, env=env,
                 )
+            if enabled(CONFIG):
+                from engine.local_process import remember_server
+                try:
+                    remember_server(process, [server, "-m", model, "--host", parsed.hostname,
+                                              "--port", str(parsed.port or 8080), "-c", "8192", "-t", "4"], base_url)
+                except OSError:
+                    pass  # A missing ownership record must refuse restarts, not fail this start.
         except OSError as error:
             return False, f"Could not start local model server: {error}"
 

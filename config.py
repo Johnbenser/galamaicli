@@ -61,7 +61,8 @@ def load_keys():
         "mistral_api_key": "MISTRAL_API_KEY",
         "scope_api_key": "SCOPE_API_KEY",
         "kilo_api_key": "KILO_API_KEY",
-        "llm7_api_key": "LLM7_API_KEY"
+        "llm7_api_key": "LLM7_API_KEY",
+        "agent_router_api_key": "AGENT_ROUTER_API_KEY"
     }
 
     for k, env_name in key_env_mappings.items():
@@ -113,10 +114,39 @@ def _load_env_from_bashrc():
 
 _load_env_from_bashrc()
 
+
+def _load_secret_files(candidates=None):
+    """Read literal credential assignments; never source or execute secret files."""
+    import re
+    import shlex
+    if candidates is None:
+        candidates = [os.path.expanduser('~/.secrets'), '/data/data/com.termux/files/home/.secrets']
+    for path in dict.fromkeys(candidates):
+        try:
+            with open(path,encoding='utf-8') as source:
+                for line in source:
+                    match = re.match(r'^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=\s*(.*)$',line)
+                    if not match or match[1] in os.environ:
+                        continue
+                    if not (match[1] in ('API_KEY','API_KEYS') or match[1].endswith(('_API_KEY','_API_TOKEN','_AUTH_TOKEN','_ACCOUNT_ID'))):
+                        continue
+                    try:
+                        values=shlex.split(match[2],comments=True)
+                    except ValueError:
+                        continue
+                    if len(values)==1 and values[0]:
+                        os.environ[match[1]]=values[0]
+        except OSError:
+            continue
+
+
+_load_secret_files()
+
 # Re-run load_keys to sync any freshly loaded env keys
 KEYS = load_keys()
 
 DEFAULT_VALUES = {
+    "local_manager": True,
     "active_endpoint": "OpenRouter" if KEYS.get("openrouter_api_key") else "Groq",
     "endpoint": "OpenRouter" if KEYS.get("openrouter_api_key") else "Groq",
     "active_model": "nvidia/nemotron-3.5-lightning:free" if KEYS.get("openrouter_api_key") else "qwen/qwen3.8-27b",
