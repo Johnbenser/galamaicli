@@ -234,9 +234,10 @@ class TuningAndMenuTests(LocalWorkspace):
         with patch.dict(CONFIG, self.config, clear=True):
             menu = InlineSettingsApp()
             items = menu._get_items()
-            self.assertEqual(len(items), 7)
+            self.assertEqual(len(items), 8)
             self.assertEqual([p["action"] for p in items[:5]], ["to_endpoints", "to_models", "toggle_mode", "toggle_fallback", "toggle_stream"])
-            self.assertEqual(items[-2]["action"], "to_local")
+            self.assertEqual(items[-3]["action"], "to_local")
+            self.assertEqual(items[-2]["action"], "to_connections")
             self.assertEqual(items[-1]["action"], "exit")
             menu.cursor_idx = 5
             self.press(menu, "enter", event)
@@ -244,7 +245,7 @@ class TuningAndMenuTests(LocalWorkspace):
             self.press(menu, "escape", event)
             self.assertEqual((menu.screen, menu.cursor_idx), ("main", 0))
             CONFIG["local_manager"] = False
-            self.assertEqual(len(menu._get_items()), 6)
+            self.assertEqual(len(menu._get_items()), 7)
             self.assertEqual(menu._get_items()[-1]["action"], "exit")
 
     def test_profile_activation_updates_endpoint_and_uses_existing_save_path(self):

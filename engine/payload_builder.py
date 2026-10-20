@@ -166,6 +166,12 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
     headers = {"Content-Type": "application/json"}
     payload = {"stream": stream}
 
+    connection = m_info.get('custom_connection')
+    if connection:
+        api_key=os.environ.get(connection['api_key_env'],'')
+        if api_key:headers['Authorization']='Bearer '+api_key
+        return connection['url'],headers,{'model':model_name,'messages':messages,'stream':stream}
+
     # 1. CLOUDFLARE
     if endpoint_name == "Cloudflare":
         account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")

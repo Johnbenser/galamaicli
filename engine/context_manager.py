@@ -5,6 +5,7 @@ import re
 
 from engine.result_store import compact_text
 from engine.repo_context import repository_context
+from engine.api_protocols import retain_reasoning
 
 
 class ContextLimitError(ValueError):
@@ -28,7 +29,7 @@ def model_limits(endpoint, model, config):
         except (TypeError, ValueError):
             return default
     local = None
-    if endpoint == "Local Endpoint":
+    if endpoint == "Local Endpoint" and not info.get('custom_connection'):
         from engine.local_tuning import effective_tuning
         local = effective_tuning(config, model)
     if local:
@@ -39,6 +40,8 @@ def model_limits(endpoint, model, config):
         if advertised:
             config["context_window"] = min(config["context_window"], positive(advertised, config["context_window"]))
     window = max(512, positive(config.get("context_window") or info.get("context_window"), 8192))
+    if info.get('custom_connection'):
+        window=min(window,positive(info.get('context_window'),window))
     output = min(positive(config.get("max_tokens"), 4096), positive(info.get("max_output_tokens"), window),
                  max(512, window // 4))
     margin = max(128, window // 20)
@@ -106,8 +109,8 @@ def _legacy_assemble_context(messages, identity, endpoint, model, config, direct
             if reference:
                 content += f"\n[Stored action {reference}; read_action_output retrieves exact lines.]"
         row = {"role": message.get("role", "user"), "content": content}
-        for field in ("tool_calls", "tool_call_id"):
-            if field in message:
+        for field in ("tool_calls", "tool_call_id", "_galam_response_reasoning"):
+            if field in message and (field != "_galam_response_reasoning" or retain_reasoning(message,endpoint,model)):
                 row[field] = message[field]
         rows.append(row)
     mandatory = {len(rows) - 1} if rows else set()
@@ -216,8 +219,8 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
             humans.append(len(rows))
         originals.append(message)
         row = {'role':message.get('role','user'), 'content':str(message.get('content',''))}
-        for field in ('tool_calls','tool_call_id'):
-            if field in message:
+        for field in ('tool_calls','tool_call_id','_galam_response_reasoning'):
+            if field in message and (field != "_galam_response_reasoning" or retain_reasoning(message,endpoint,model)):
                 row[field] = message[field]
         rows.append(row)
     human = humans[-1] if humans else max(0,len(rows)-1)

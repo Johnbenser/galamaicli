@@ -91,6 +91,8 @@ def urllib_stream_request(url: str, headers: dict, payload: dict, timeout: int =
 
 
 def _recorded_post(url, headers, payload, stream_enabled, timeout):
+    from engine.api_protocols import prepare_payload
+    payload=prepare_payload(url,payload)
     model = payload.get('model') or (url.split('/models/',1)[1].split(':',1)[0] if '/models/' in url else CONFIG.get('active_model',''))
     row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),model,payload,delta='/ai/run/' in url)
     try:
@@ -103,6 +105,8 @@ def _recorded_post(url, headers, payload, stream_enabled, timeout):
 
 
 def _recorded_urllib(url,headers,payload,timeout):
+    from engine.api_protocols import prepare_payload
+    payload=prepare_payload(url,payload)
     row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),payload.get('model',CONFIG.get('active_model','')),payload,delta='/ai/run/' in url)
     try:
         response = cancellation.call(lambda: urllib_stream_request(url,headers,payload,timeout=timeout),
@@ -116,6 +120,12 @@ def _recorded_urllib(url,headers,payload,timeout):
 def _response_json(response,is_urllib=False):
     data = cancellation.call(lambda: json.loads(response.read().decode('utf-8',errors='replace')) if is_urllib else response.json())
     usage_meter.capture(response,data)
+    if isinstance(data,dict):
+        from engine.api_protocols import remember_reasoning,response_chunk
+        remember_reasoning(response,data)
+        if data.get('object')=='response' and data.get('status') in ('completed','incomplete','failed'):
+            try:response._galam_finish_reason=response_chunk({'type':'response.'+data['status'],'response':data},response)[3]
+            except ValueError as error:raise ProviderStreamError(str(error)) from None
     row=getattr(response,'_galam_usage_record',{})
     if isinstance(row,dict):
         content,reasoning=_extract_response_content(row.get('endpoint',''),row.get('model',''),data)
@@ -248,6 +258,10 @@ def _detect_and_synthesize_tool_calls(text: str, resp_json: dict = None) -> list
     if resp_json and isinstance(resp_json, dict):
         data = resp_json.get("result", resp_json)
         if isinstance(data, dict):
+            if 'output' in data:
+                from engine.api_protocols import output_parts
+                tools=output_parts(data)[2]
+                if tools:return tools
             choices = data.get("choices", [])
             if choices and isinstance(choices[0], dict):
                 msg = choices[0].get("message", {})
@@ -259,7 +273,7 @@ def _detect_and_synthesize_tool_calls(text: str, resp_json: dict = None) -> list
 
 
 
-def _extract_stream_chunk(chunk_json):
+def _extract_stream_chunk(chunk_json,response=None):
     content_delta = ""
     reasoning_delta = ""
     tool_call_deltas = []
@@ -267,6 +281,10 @@ def _extract_stream_chunk(chunk_json):
     if not isinstance(chunk_json, dict):
         return content_delta, reasoning_delta, tool_call_deltas, finish_reason
     _raise_provider_error(chunk_json)
+    from engine.api_protocols import response_chunk
+    try:converted=response_chunk(chunk_json,response)
+    except ValueError as error:raise ProviderStreamError(str(error)) from None
+    if converted is not None:return converted
 
     # Cohere v2 carries text in delta.message.content rather than choices[].
     if chunk_json.get("type") == "content-delta":
@@ -437,6 +455,11 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
         message = data["message"]
         return text_value(message.get("content", "")).strip(), text_value(message.get("reasoning", "")).strip()
 
+    if 'output' in data:
+        from engine.api_protocols import output_parts
+        content,reasoning,_,_=output_parts(data)
+        return content.strip(),reasoning.strip()
+
     if "output_text" in data and isinstance(data["output_text"], str):
         if data["output_text"].strip():
             return data["output_text"].strip(), ""
@@ -590,7 +613,7 @@ def query_subagent(messages: list) -> str:
     active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", "Direct")
     active_m = CONFIG.get("active_model") or CONFIG.get("model", "gemini-3.5-flash")
 
-    if active_ep == "Local Endpoint":
+    if active_ep == "Local Endpoint" and not ENDPOINT_REGISTRY[active_ep]["models"].get(active_m,{}).get("custom_connection"):
         from engine.local_models import refresh_local_models
         advertised = refresh_local_models(CONFIG)
         if advertised and active_m not in advertised:
@@ -650,7 +673,7 @@ def query_subagent(messages: list) -> str:
                         try:
                             chunk_json = json.loads(raw_chunk)
                             usage_meter.capture(resp,chunk_json)
-                            c_tok, r_tok, side_tools, _ = _extract_stream_chunk(chunk_json)
+                            c_tok, r_tok, side_tools, _ = _extract_stream_chunk(chunk_json,resp)
                             usage_meter.record_output(resp,c_tok,r_tok,side_tools)
                             c_tok, r_tok = splitter.feed(c_tok, r_tok)
                             full_content += c_tok
@@ -710,7 +733,7 @@ def query_with_fallback(*args, **kwargs):
         return 'EXHAUSTED', active_m
     visited.add(active_ep)
 
-    if active_ep == "Local Endpoint":
+    if active_ep == "Local Endpoint" and not ENDPOINT_REGISTRY[active_ep]["models"].get(active_m,{}).get("custom_connection"):
         from engine.local_models import refresh_local_models
         advertised = refresh_local_models(CONFIG)
         if advertised and active_m not in advertised:
@@ -719,7 +742,7 @@ def query_with_fallback(*args, **kwargs):
 
     models_in_ep = [
         m for m in ENDPOINT_REGISTRY[active_ep]["models"].keys()
-        if not (active_ep == "Cloudflare" and not m.startswith("@cf/"))
+        if not (active_ep == "Cloudflare" and not m.startswith("@cf/") and not ENDPOINT_REGISTRY[active_ep]["models"][m].get("custom_connection"))
     ]
     ordered_models = [active_m] if active_m in models_in_ep else []
     ordered_models += [m for m in models_in_ep if m not in ordered_models]
@@ -780,7 +803,7 @@ def query_with_fallback(*args, **kwargs):
                     sys.stdout.write(f'\n[!] {conn_err}\n')
                     sys.stdout.flush()
                     return 'FAILED', active_m
-                if active_ep == "Local Endpoint":
+                if active_ep == "Local Endpoint" and not ENDPOINT_REGISTRY[active_ep]["models"].get(model_name,{}).get("custom_connection"):
                     from engine.local_server import ensure_local_server
                     started, start_message = ensure_local_server(url.rsplit("/chat/completions", 1)[0])
                     sys.stdout.write(f"\r\033[38;5;244m    {start_message}\033[0m\n")
@@ -915,6 +938,7 @@ def query_with_fallback(*args, **kwargs):
             streamed_tool_calls = {}
             resp_json = None
             last_finish_reason = ""
+            retained_reasoning=[]
             AGENT_STATE["is_streaming"] = True
 
             c_type = resp.headers.get("Content-Type", "") if hasattr(resp, "headers") else (resp.info().get("Content-Type", "") if hasattr(resp, "info") else "")
@@ -938,7 +962,7 @@ def query_with_fallback(*args, **kwargs):
                             try:
                                 chunk_json = json.loads(raw_chunk)
                                 usage_meter.capture(resp,chunk_json)
-                                c_tok, r_tok, tc_deltas, f_reason = _extract_stream_chunk(chunk_json)
+                                c_tok, r_tok, tc_deltas, f_reason = _extract_stream_chunk(chunk_json,resp)
                                 usage_meter.record_output(resp,c_tok,r_tok,tc_deltas)
                                 if f_reason:
                                     last_finish_reason = f_reason
@@ -1018,8 +1042,10 @@ def query_with_fallback(*args, **kwargs):
                 thought_ui.clear()
                 AGENT_STATE["is_streaming"] = False
                 full_content, full_reasoning = _extract_response_content(active_ep, model_name, resp_json)
+                last_finish_reason=getattr(resp,'_galam_finish_reason','')
 
             # --- AUTO-CONTINUATION FOR TOKEN-LIMITED FREE ENDPOINTS ---
+            retained_reasoning.extend(getattr(resp,'_galam_response_reasoning',[]))
             # If the stream cut off, hit max_tokens, or ended mid-sentence/mid-tool-call,
             # automatically treat the remaining generation as a continuation request so it
             # seamlessly continues all along without aborting or stalling.
@@ -1036,6 +1062,8 @@ def query_with_fallback(*args, **kwargs):
                 stripped_content = full_content.strip()
                 if stripped_content:
                     cont_messages.append({"role": "assistant", "content": stripped_content})
+                    if retained_reasoning:
+                        cont_messages[-1]['_galam_response_reasoning']=list(retained_reasoning)
                     tail = stripped_content[-80:] if len(stripped_content) > 80 else stripped_content
                     if any(t in stripped_content for t in ("<tool_call>", "<invoke>", "<action>")) and not any(t in stripped_content for t in ("</tool_call>", "</invoke>", "</action>")):
                         cont_prompt = f"Your tool call was cut off at: '{tail}'. Complete the tool call immediately and close it with </tool_call>."
@@ -1049,6 +1077,7 @@ def query_with_fallback(*args, **kwargs):
                         cont_prompt = "Your stream ended abruptly. Complete your response or autonomous tool call immediately."
                     cont_messages.append({"role": "user", "content": cont_prompt})
 
+                c_resp=None
                 try:
                     c_enforced = build_enforced_messages(cont_messages, active_ep, model_name)
                     c_url, c_headers, c_payload = build_request_data(
@@ -1096,7 +1125,7 @@ def query_with_fallback(*args, **kwargs):
                                 try:
                                     c_chunk_json = json.loads(c_raw)
                                     usage_meter.capture(c_resp,c_chunk_json)
-                                    c_c_tok, c_r_tok, c_tc_deltas, c_f_reason = _extract_stream_chunk(c_chunk_json)
+                                    c_c_tok, c_r_tok, c_tc_deltas, c_f_reason = _extract_stream_chunk(c_chunk_json,c_resp)
                                     usage_meter.record_output(c_resp,c_c_tok,c_r_tok,c_tc_deltas)
                                     if c_f_reason:
                                         last_finish_reason = c_f_reason
@@ -1139,7 +1168,7 @@ def query_with_fallback(*args, **kwargs):
                             full_content += (" " + c_part) if full_content else c_part
                         if r_part:
                             full_reasoning += ("\n\n" + r_part) if full_reasoning else r_part
-                        last_finish_reason = "stop"
+                        last_finish_reason = getattr(c_resp,'_galam_finish_reason','stop')
                 except cancellation.TaskCancelled:
                     raise
                 except ProviderStreamError:
@@ -1149,6 +1178,8 @@ def query_with_fallback(*args, **kwargs):
                 finally:
                     thought_ui.clear()
                     AGENT_STATE["is_streaming"] = False
+                    if c_resp is not None:
+                        retained_reasoning.extend(getattr(c_resp,'_galam_response_reasoning',[]))
 
 
             tail_content, tail_reason = reasoning_stream.feed(final=True)
@@ -1284,6 +1315,8 @@ def query_with_fallback(*args, **kwargs):
                 streamed=True,
                 raw={"model": model_name}
             )
+            response_obj.response_reasoning=retained_reasoning
+            response_obj.response_origin=[active_ep,model_name,url]
             return response_obj, model_name
 
         except requests.exceptions.RequestException as req_err:

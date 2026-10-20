@@ -27,6 +27,8 @@ def tool_schemas():
 
 def _key(endpoint, model, config):
     from storage.endpoints import ENDPOINT_REGISTRY
+    connection=ENDPOINT_REGISTRY.get(endpoint,{}).get('models',{}).get(model,{}).get('custom_connection')
+    if connection:return endpoint,model,connection['url']
     if endpoint == "Local Endpoint":
         from engine.local_models import local_base_url
         base = local_base_url(config)
@@ -39,9 +41,11 @@ def options(endpoint, model, messages, config):
     from storage.conversations import scoped_messages
     messages = scoped_messages(messages)
     # Providers with different tool wire formats keep Galam's text protocol.
-    if endpoint not in {"Local Endpoint", "OpenRouter", "NVIDIA", "Groq", "ModelScope", "Cloudflare", "Agent Router"}:
+    from storage.endpoints import ENDPOINT_REGISTRY
+    custom=ENDPOINT_REGISTRY.get(endpoint,{}).get('models',{}).get(model,{}).get('custom_connection')
+    if not custom and endpoint not in {"Local Endpoint", "OpenRouter", "NVIDIA", "Groq", "ModelScope", "Cloudflare", "Agent Router"}:
         return {}
-    if endpoint == "Cloudflare":
+    if endpoint == "Cloudflare" and not custom:
         from storage.endpoints import ENDPOINT_REGISTRY
         if ENDPOINT_REGISTRY.get(endpoint, {}).get("models", {}).get(model, {}).get("route_type") != "v1":
             return {}

@@ -679,6 +679,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
         assistant_content = response_msg.content if response_msg else ""
         if assistant_content:
             messages.append({"role": "assistant", "content": assistant_content})
+            if getattr(response_msg,'response_reasoning',None):
+                messages[-1]['_galam_response_reasoning']=response_msg.response_reasoning
+                messages[-1]['_galam_response_origin']=getattr(response_msg,'response_origin',None)
 
         tool_calls = getattr(response_msg, "tool_calls", [])
         if not tool_calls and isinstance(response_msg, dict):
@@ -753,6 +756,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 messages[-1]["_galam_tool_calls"] = tool_calls
             else:
                 messages.append({"role": "assistant", "content": "", "_galam_tool_calls": tool_calls})
+            if getattr(response_msg,'response_reasoning',None):
+                messages[-1]['_galam_response_reasoning']=response_msg.response_reasoning
+                messages[-1]['_galam_response_origin']=getattr(response_msg,'response_origin',None)
 
         # If we have tool calls and assistant had introductory text, display it as a step line
         if tool_calls and assistant_content:

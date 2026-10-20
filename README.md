@@ -34,6 +34,7 @@ Galam is its own assistant, with its own terminal interface, settings, action wo
 |---|---|
 | **Real terminal actions** | Structured tool calls reach the execution layer; results carry success/failure status and exit codes. |
 | **Visible code changes** | Edits display line numbers, red deletions, and green additions. Existing files are inspected before focused modifications. |
+| **Custom connections** | Add models and API routes in settings; keys stay in home-owned `~/.secrets`. |
 | **Model flexibility** | Provider adapters handle their request formats. Compatible models can use native tools; text tool calls remain available as a fallback. |
 | **Budgeted context** | A local context engine reserves response space and selects relevant conversation and tool evidence. No extra summarizer model is required. |
 | **Conversation isolation** | A chat uses its own history. `/btw` has separate side-chat history and cancellation. |
@@ -109,6 +110,26 @@ python -m pip install -r requirements.txt
 Restart Galam after updating. Commit or set aside your own source changes before pulling.
 
 ## Connect a model
+
+### Add a model or custom endpoint in settings
+
+Open **`/settings` → Model Connections**. A separate editor opens, then returns to your existing settings screen.
+
+1. Type an **endpoint group**, or use **Choose endpoint** to assign the model to an existing group.
+2. Enter the provider's exact **model ID**.
+3. Paste a base URL such as `https://example.com/v1`, or the complete API URL.
+4. Choose **Chat Completions** (`/v1/chat/completions`) or **Responses** (`/v1/responses`). Responses is plural; a pasted `/v1/response` is corrected. Pasting a complete route selects its format automatically.
+5. Enter a credential variable name, or leave it blank to generate one. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
+6. Enter the **masked API key**. A blank field keeps an existing referenced key; a service requiring no key can leave it empty. Set the model's context window to its supported limit.
+7. Choose whether to **use this model now**, then save with the button or **Ctrl+S**.
+
+**Tab / Shift+Tab** moves between fields; arrows and Space select the API format; **Esc** cancels. **Saved models** loads a previously added connection for editing. Save feedback stays inside the editor, with no key value or overlapping printed confirmation. Connection changes are blocked during active main/side tasks.
+
+Custom definitions live in **`~/.galam/endpoints.json`** and contain only routing metadata and credential variable names. Keys entered here go only into **`~/.secrets`**, written privately with mode `600`. Existing exports and comments are preserved; updating a variable avoids duplicate assignments. The selected home follows an existing Termux `~/.secrets` when Galam runs through an alternate home, and `GALAM_HOME` can explicitly select a home directory.
+
+Saving applies the credential in Galam immediately, so its next request needs no restart or manual source command. A guarded source line is added once to the selected home's `.bashrc` or `.zshrc` for future shells. An already-open parent terminal has its own environment; run `source ~/.secrets` there if you also need the updated variable outside Galam. Galam reads literal assignments itself and does not execute the rest of your secret file.
+
+New connections can join built-in endpoint groups without replacing their existing model routes. Editing built-in model definitions through this editor is rejected; load a saved custom profile to edit that profile. Models referring to the same credential variable share its key. These connections support OpenAI-compatible Chat Completions and Responses, including text, streaming, function calls and tool results; other API families such as embeddings or Anthropic Messages require their own adapters.
 
 ### Remote providers
 
@@ -231,6 +252,7 @@ galamaicli/
 ├── galamai                      # Portable command launcher
 ├── config.py                    # Local settings and credential loading
 ├── engine/
+│   ├── api_protocols.py         # Responses input, events and tool exchange
 │   ├── context_manager.py       # Context budget and message selection
 │   ├── context_compaction.py    # Recoverable overflow handling
 │   ├── prompt_context.py        # Compact identity and observations
@@ -254,12 +276,14 @@ galamaicli/
 ├── routers/manager.py           # Provider transports and response handling
 ├── storage/
 │   ├── endpoints.py             # Provider/model catalog
+│   ├── user_endpoints.py        # Home-owned profiles and private key updates
 │   ├── conversations.py         # Conversation ownership and persistence
 │   └── keys.example.json        # Empty credential template
 ├── ui/
 │   ├── dock_layout.py           # Live terminal input and trace panel
 │   ├── response_renderer.py     # Tables, headings, lists and code
 │   ├── settings_menu.py         # Endpoint/model/settings screens
+│   ├── endpoint_manager.py      # Custom connection editor and masked key entry
 │   └── conversation_picker.py   # Full-screen resume UI
 ├── tools/                       # Filesystem tools and development audits
 ├── tests/                       # Behavioral regression tests
@@ -405,7 +429,8 @@ Tab completes slash commands. The Ctrl+O and `/help` suggestion appears after th
 | Location | Purpose |
 |---|---|
 | `~/.galam_ai_settings.json` | User settings; legacy/Termux settings locations are also supported |
-| `~/.secrets` | Optional literal credential environment assignments |
+| `~/.secrets` | Credential assignments; custom editor saves keys here only |
+| `~/.galam/endpoints.json` | Custom model connections and credential variable references |
 | `storage/keys.json` | Optional local JSON credentials; Git-ignored |
 | `~/.galam_conversations/` | Saved, conversation-owned history |
 | `~/.galam/resume-ui.json` | Resume picker color preference |
@@ -422,7 +447,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 228 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 255 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise both API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
@@ -433,6 +458,7 @@ python -m unittest discover -s tests -q
 | [Local model manager](artifacts/LOCAL_MODEL_MANAGER.md) | Profiles, testing and tuning |
 | [Queue and session recovery](artifacts/SESSION_RECOVERY_QUEUE_RESUME.md) | Cancellation and resume behavior |
 | [Side chat and activity](artifacts/BTW_STATUS_RESUME_UPDATE.md) | `/btw`, progress labels and resume design |
+| [Custom connections](artifacts/CUSTOM_CONNECTIONS.md) | Home storage, secret handling, UI and protocol verification |
 | [Response presentation](artifacts/RESPONSE_PRESENTATION_UPDATE.md) | Frozen completion, permanent footers and rendering |
 | [Output preview](artifacts/RESPONSE_LAYOUT_PREVIEW.txt) | Plain-text example of the terminal layout |
 

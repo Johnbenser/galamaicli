@@ -341,3 +341,7 @@ ENDPOINT_REGISTRY = {
     }
 }
 
+
+# Private, home-owned custom connections overlay the public provider catalog.
+from storage.user_endpoints import load_into as _load_user_endpoints
+_load_user_endpoints(ENDPOINT_REGISTRY)

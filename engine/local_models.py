@@ -67,6 +67,8 @@ def refresh_local_models(config):
                 **_MODEL_INFO.get((local_base_url(config), model_id), {}),
             } for model_id in ids
         }
+        ENDPOINT_REGISTRY['Local Endpoint']['models'].update({
+            name:info for name,info in previous.items() if info.get('custom_connection')})
     return ids
 
 

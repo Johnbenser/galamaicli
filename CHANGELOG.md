@@ -2,9 +2,15 @@
 
 User-facing improvements and bug fixes for Galam.AI. Entries describe implemented behavior; provider-side availability and model quality can vary.
 
-## Unreleased — workflow, session and presentation update
+## Unreleased — connections, workflows and presentation
 
 ### Added
+
+- Settings → Model Connections: add/edit a model, assign an endpoint group, choose Chat Completions or Responses, enter a masked API key and optionally activate immediately.
+- Home-owned `~/.galam/endpoints.json` for connection metadata; keys are saved only to `~/.secrets` with private permissions, literal shell quoting and preserved existing exports/comments.
+- Immediate credential application in Galam, startup credential reload and a deduplicated guarded Bash/Zsh source line for future terminals.
+- Responses API input/tool-output conversion, streamed function arguments, final snapshots, provider usage and connection-scoped reasoning continuity.
+- Custom-connection regression tests, including local HTTP/Bash round trips, transactional rollback, stale-export reload and phone-sized editor input/save/cancel behavior.
 
 - Conversation-owned context and resumable history with working-directory restoration.
 - Full-screen centered resume picker, conversation previews, five persistent accent colors, keyboard navigation and permanent selected-history deletion.
@@ -46,7 +52,7 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Verification
 
-- Latest recorded full local suite: **228 tests passed**.
+- Latest recorded full local suite: **255 tests passed**.
 - Changed response-presentation modules passed Python compilation.
 - Coverage includes actions/edits, context ownership and overflow, streaming/usage, cancellation/queue recovery, side-chat isolation, Ctrl+O, resume and terminal rendering.
 - Fixture tests do not establish every live provider/model combination. Agent Router can reject custom clients under its access policy; the adapter does not bypass that policy.

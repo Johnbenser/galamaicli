@@ -43,6 +43,7 @@ class InlineSettingsApp:
             ]
             if CONFIG.get("local_manager", True) is not False:
                 items.insert(-1, self.local_screens.main_item())
+            items.insert(-1, {"label":"Model Connections", "hint":"[Add / Edit]", "action":"to_connections"})
             return items
         elif self.screen == "endpoints":
             eps = list(ENDPOINT_REGISTRY.keys())
@@ -121,6 +122,8 @@ class InlineSettingsApp:
                 elif act == "to_local":
                     self.screen = "local"
                     self.cursor_idx = 0
+                elif act == "to_connections":
+                    event.app.exit(result='connections')
                 elif act == "exit":
                     event.app.exit()
 
@@ -241,9 +244,16 @@ class InlineSettingsApp:
             style=style,
             full_screen=False
         )
-        app.run()
-        sys.stdout.write("\033[10A\r\033[J")
-        sys.stdout.flush()
+        while True:
+            result=app.run()
+            sys.stdout.write("\033[10A\r\033[J")
+            sys.stdout.flush()
+            if result!='connections':break
+            from ui.endpoint_manager import EndpointManager
+            EndpointManager().run()
+            self.selected_ep=CONFIG.get('active_endpoint',self.selected_ep)
+            self.screen='main'
+            self.cursor_idx=1
 
 def handle_settings_menu():
     InlineSettingsApp(initial_screen="main").run()
