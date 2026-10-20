@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import time
+import hashlib
 from pathlib import Path
 
 
@@ -39,6 +40,16 @@ def compact_text(text, limit):
     available = max(0, limit - len(marker))
     head = available // 3
     return text[:head] + marker + (text[-(available - head):] if available > head else "")
+
+
+def archive_context(text):
+    """Content-addressed prompt overflow, readable through the existing output tool."""
+    data = str(text).encode('utf-8', errors='replace')
+    action_id = hashlib.sha256(data).hexdigest()[:32]
+    path = runtime_dir('results') / (action_id + '.txt')
+    if not path.is_file():
+        atomic_bytes(path, data)
+    return action_id
 
 
 def store_result(result):

@@ -9,9 +9,10 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.styles import Style
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.controls import BufferControl
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.containers import ConditionalContainer, Window
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.filters import to_filter
+from prompt_toolkit.filters import to_filter, Condition
 from prompt_toolkit.patch_stdout import patch_stdout
 from config import CONFIG, AGENT_STATE
 from engine.task_runner import GLOBAL_TASK_MANAGER
@@ -24,6 +25,7 @@ THEME = {
 }
 
 LAST_CTRL_C_TIME = 0
+CLI_OPENED_AT = time.monotonic()
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 SLASH_COMMANDS = [
@@ -37,9 +39,11 @@ SLASH_COMMANDS = [
     ("/edit", "Open in-terminal code editor"),
     ("/exit", "Exit Galam.AI session"),
     ("/help", "List available commands"),
+    ("/local", "Test local server and manage owned startup"),
     ("/model", "Switch Models under Active Endpoint"),
     ("/mode", "Toggle Review / Auto / Always-Proceed mode"),
     ("/plan", "Generate implementation plan"),
+    ("/queue", "Show queued prompts; /queue clear removes pending prompts"),
     ("/settings", "Switch Endpoints and Options"),
     ("/status", "Inspect storage and tokens"),
     ("/tasks", "View and manage active background server tasks")
@@ -63,10 +67,16 @@ kb = KeyBindings()
 def handle_ctrl_c(event):
     global LAST_CTRL_C_TIME
     buf = event.current_buffer
+    if AGENT_STATE.get('in_btw_mode'):
+        if AGENT_STATE.get('close_btw'):
+            AGENT_STATE['close_btw']()
+        buf.reset()
+        event.app.invalidate()
+        return
 
     if AGENT_STATE.get("is_thinking", False):
-        AGENT_STATE["abort"] = True
-        AGENT_STATE["is_thinking"] = False
+        from engine.cancellation import cancel_current
+        cancel_current()
         event.app.invalidate()
         return
 
@@ -93,17 +103,23 @@ def handle_ctrl_c(event):
 
 @kb.add('escape')
 def handle_escape(event):
-    if AGENT_STATE.get("is_thinking", False):
-        AGENT_STATE["abort"] = True
-        AGENT_STATE["is_thinking"] = False
+    if AGENT_STATE.get('in_btw_mode'):
+        if AGENT_STATE.get('close_btw'):
+            AGENT_STATE['close_btw']()
+        else:
+            AGENT_STATE['in_btw_mode'] = False
+        event.current_buffer.reset()
         event.app.invalidate()
         return
-
-    if AGENT_STATE.get("review_pending", False):
-        AGENT_STATE["review_decision"] = "cancel"
-        if AGENT_STATE.get("review_event"):
-            AGENT_STATE["review_event"].set()
-        AGENT_STATE["review_pending"] = False
+    if AGENT_STATE.get('task_active') or AGENT_STATE.get('is_thinking') or AGENT_STATE.get('review_pending'):
+        now = time.monotonic()
+        armed = AGENT_STATE.get('escape_armed_at')
+        if armed is not None and now - armed <= 1.0:
+            from engine.cancellation import cancel_current
+            cancel_current()
+            AGENT_STATE['escape_armed_at'] = None
+        else:
+            AGENT_STATE['escape_armed_at'] = now
         event.app.invalidate()
         return
 
@@ -127,6 +143,20 @@ def handle_escape(event):
         buf.text = ""
         buf.cursor_position = 0
         event.app.invalidate()
+
+
+@kb.add('escape', 'escape')
+def handle_double_escape(event):
+    if AGENT_STATE.get('in_btw_mode'):
+        handle_escape(event)
+        return
+    if AGENT_STATE.get('task_active') or AGENT_STATE.get('is_thinking') or AGENT_STATE.get('review_pending'):
+        from engine.cancellation import cancel_current
+        cancel_current()
+        AGENT_STATE['escape_armed_at'] = None
+        event.app.invalidate()
+    else:
+        handle_escape(event)
 
 @kb.add('up')
 def handle_up(event):
@@ -155,21 +185,48 @@ def handle_down(event):
 @kb.add('c-o')
 def handle_ctrl_o(event):
     AGENT_STATE["show_thoughts"] = not AGENT_STATE.get("show_thoughts", False)
-
-    # Expanded → print the thought trace box if there's content
-    if AGENT_STATE["show_thoughts"]:
-        past = AGENT_STATE.get("last_reasoning", "").strip()
-        if past:
-            cols = shutil.get_terminal_size((44, 24)).columns
-            div = "─" * min(cols - 2, 42)
-            sys.stdout.write(f"\n\033[38;5;141m╭─ [Thought Trace]{div[len('╭─ [Thought Trace]'):]}╮\033[0m\n")
-            for line in past.splitlines():
-                sys.stdout.write(f"\033[38;5;244m│ {line}\033[0m\n")
-            sys.stdout.write(f"\033[38;5;141m╰{div}╯\033[0m\n\n")
-            sys.stdout.flush()
-    # Collapsed → silently hide; no stdout message at all
-
+    AGENT_STATE["thought_scroll"] = 0
     event.app.invalidate()
+
+
+@kb.add('c-pageup')
+def thought_page_up(event):
+    if AGENT_STATE.get('show_thoughts'):
+        AGENT_STATE['thought_scroll'] = AGENT_STATE.get('thought_scroll', 0) + 6
+        event.app.invalidate()
+
+
+@kb.add('c-pagedown')
+def thought_page_down(event):
+    if AGENT_STATE.get('show_thoughts'):
+        AGENT_STATE['thought_scroll'] = max(0, AGENT_STATE.get('thought_scroll', 0) - 6)
+        event.app.invalidate()
+
+
+def get_thought_panel_tokens():
+    """A bounded live viewport. Hidden text never enters terminal scrollback."""
+    from engine.transparency import trace_text, safe_display
+    from prompt_toolkit.utils import get_cwidth
+    size = prompt_session.app.output.get_size()
+    width = max(8, size.columns - 3)
+    height = max(1, min(12, size.rows // 3) - 1)
+    lines = []
+    for line in safe_display(trace_text()).expandtabs(4).split('\n'):
+        part, cells = '', 0
+        for char in line:
+            count = get_cwidth(char)
+            if cells + count > width:
+                lines.append(part);part, cells = '', 0
+            part += char;cells += count
+        lines.append(part)
+    offset = min(max(0, AGENT_STATE.get('thought_scroll', 0)), max(0, len(lines) - height))
+    AGENT_STATE['thought_scroll'] = offset
+    end = len(lines) - offset
+    start = max(0, end - height)
+    state = 'Live' if (_thinking_active() or _btw_active()) else 'Completed'
+    title = f' {state} trace {start+1}–{end}/{len(lines)} · Ctrl+O hide · Ctrl+PgUp/PgDn scroll'
+    return [('fg:#a78bfa', title[:width] + '\n'),
+            ('fg:#a1a1aa', '\n'.join(' ' + line for line in lines[start:end]))]
 
 @kb.add('tab')
 def handle_tab(event):
@@ -194,17 +251,89 @@ def handle_enter(event):
             idx = AGENT_STATE.get("slash_idx", 0) % len(matching)
             buf.text = matching[idx]
             buf.cursor_position = len(buf.text)
+    text = buf.text.strip()
+    first = text.split(maxsplit=1)[0] if text else ''
+    command = first.startswith('!') or (first.startswith('/') and '/' not in first[1:])
+    review_answer = AGENT_STATE.get('review_pending') and text.lower() in ('','y','yes','n','no','cancel','c')
+    enqueue = AGENT_STATE.get('enqueue_prompt')
+    if (AGENT_STATE.get('task_active') or AGENT_STATE.get('active_message')) and enqueue and not command and not review_answer and not AGENT_STATE.get('in_btw_mode'):
+        if text:
+            enqueue(text)
+            buf.reset()
+        event.app.invalidate()
+        return
     AGENT_STATE["slash_idx"] = 0
     buf.validate_and_handle()
+
+
+def get_pending_prompt_tokens(cols):
+    """Pending text is a live dock element, never an automatic console notice."""
+    from engine.transparency import safe_display
+    from prompt_toolkit.utils import get_cwidth
+    pending = AGENT_STATE.get('queued_messages') or []
+    tokens = []
+    width = max(8, cols-5)
+    for item in pending[:2]:
+        text = re.sub(r'\s+', ' ', safe_display(item['text'])).strip()
+        shown, cells = '', 0
+        for char in text:
+            cells += get_cwidth(char)
+            if cells > width-1:
+                shown += '…'
+                break
+            shown += char
+        tokens.append(('fg:#94a3b8', f'  ↳ {shown}\n'))
+    if len(pending)>2:
+        tokens.append(('fg:#71717a', f'  +{len(pending)-2} more pending\n'))
+    return tokens
+
+
+def completed_task_text():
+    timing = AGENT_STATE.get('last_task_timing')
+    if not timing:
+        return ''
+    seconds = max(0,int(timing['elapsed']))
+    minutes, seconds = divmod(seconds,60)
+    label = 'Cancelled after' if timing.get('cancelled') else 'Worked for'
+    clock=time.strftime('%H:%M:%S',time.localtime(timing.get('finished_at',0)))
+    return f'{label} {minutes}m {seconds:02d}s • {clock}'
+
+def _thinking_active():
+    if AGENT_STATE.get('abort',False):return False
+    if AGENT_STATE.get('task_active',False):return True
+    handler=AGENT_STATE.get('active_thought_handler')
+    return bool(AGENT_STATE.get('is_thinking') and handler and handler.row.get('phase')!='Generation ended')
+
+
+def _btw_active():
+    return AGENT_STATE.get('in_btw_mode') and any(
+        entry.get('task')=='btw' for entry in AGENT_STATE.get('active_subagents',[]))
+
+
+def shortcut_hint_visible(now=None):
+    elapsed = (time.monotonic() if now is None else now) - CLI_OPENED_AT
+    return elapsed >= 30 and (elapsed - 30) % 210 < 30
+
+
+def _refresh_thinking_animation():
+    """The animation clock is independent of network responses and token arrivals."""
+    app = AGENT_STATE.get('app_ref')
+    if (_thinking_active() or _btw_active()) and app:
+        try:
+            app.invalidate()
+        except Exception:
+            pass  # A closing display must not stop the animation thread.
+
 
 def get_prompt_text():
     """Renders the thinking status directly above the stagnant dock's top divider."""
     cols = shutil.get_terminal_size((44, 24)).columns
     divider = "─" * max(10, cols - 1)
     tokens = []
+    live = not prompt_session.app.is_done
 
     # 1. Live Thinking Header (animated loading spinner with dynamic dots)
-    if AGENT_STATE.get("is_thinking", False):
+    if (_thinking_active() or _btw_active()) and live:
         SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         DOT_FRAMES = [".  ", ".. ", "...", " ..", "  .", "   "]
         t = time.time()
@@ -212,25 +341,30 @@ def get_prompt_text():
         dots = DOT_FRAMES[int(t * 3) % len(DOT_FRAMES)]
 
         tokens.append(("fg:#38bdf8 bold", f" {spinner_char} "))
-        tokens.append(("fg:#ffffff bold", f"Loading{dots} "))
+        activity = (AGENT_STATE.get('activity_label') or 'Thinking') if _thinking_active() else 'Thinking'
+        tokens.append(("fg:#ffffff bold", f"{activity}{dots} "))
 
-        topic = AGENT_STATE.get("current_thought", "")
+        topic = AGENT_STATE.get("current_thought", "") if _thinking_active() else 'Answering the side question.'
         clean_topic = topic.strip()
-        if clean_topic and clean_topic not in ("Analyzing query...", "Executing execute_bash...", "Responding..."):
-            max_topic = max(10, cols - 24)
-            tokens.append((f"fg:{THEME['status_text']}", f"({clean_topic[:max_topic]})\n"))
+        if clean_topic:
+            max_topic = max(18, cols - 4)
+            shown_topic = clean_topic if len(clean_topic) <= max_topic else clean_topic[:max_topic - 1] + "…"
+            tokens.append((f"fg:{THEME['status_text']}", f"\n {shown_topic}\n"))
         else:
             tokens.append(("", "\n"))
+
+    if live:
+        tokens.extend(get_pending_prompt_tokens(cols))
 
     # 2. Top Divider Line
     tokens.append((f"fg:{THEME['border']}", f"{divider}\n"))
 
     # 3. Prompt Arrow
-    if AGENT_STATE.get("review_pending", False):
+    if AGENT_STATE.get("in_btw_mode", False):
+        tokens.append((f"fg:{THEME['shortcut']} bold", "btw> "))
+    elif AGENT_STATE.get("review_pending", False):
         prompt_label = AGENT_STATE.get("review_prompt") or "Action [Y/n]> "
         tokens.append(("fg:#facc15 bold", prompt_label))
-    elif AGENT_STATE.get("in_btw_mode", False):
-        tokens.append((f"fg:{THEME['shortcut']} bold", "btw> "))
     else:
         tokens.append((f"fg:{THEME['prompt_arrow']}", "> "))
 
@@ -310,13 +444,20 @@ def get_bottom_toolbar_tokens():
         tokens.extend(pill_tokens)
         tokens.append((f"fg:{THEME['border']}", f"{divider}\n"))
 
-    if AGENT_STATE.get("is_thinking", False):
-        left_status = "esc to cancel"
+    armed = AGENT_STATE.get('escape_armed_at')
+    if AGENT_STATE.get('in_btw_mode'):
+        left_status = 'esc closes /btw'
+    elif armed is not None and time.monotonic() - armed <= 1:
+        left_status = 'press esc again to cancel'
+    elif _thinking_active():
+        left_status = "esc twice to cancel"
     elif (time.time() - LAST_CTRL_C_TIME) < 3.5:
         left_status = "press ctrl+c again to exit"
-    else:
+    elif shortcut_hint_visible():
         thought_state = "expanded" if AGENT_STATE.get("show_thoughts", False) else "minimized"
         left_status = f"ctrl+o thoughts ({thought_state}) · /help"
+    else:
+        left_status = ''
 
     gap_len = max(1, cols - len(left_status) - len(right_status))
     tokens.append((f"fg:{THEME['status_text']}", left_status))
@@ -338,6 +479,15 @@ prompt_session = PromptSession(
     reserve_space_for_menu=0
 )
 
+thought_panel = ConditionalContainer(
+    Window(FormattedTextControl(get_thought_panel_tokens), dont_extend_height=True),
+    filter=Condition(lambda: bool(AGENT_STATE.get('show_thoughts', False)) and not prompt_session.app.is_done)
+)
+prompt_session.layout.container.children.insert(0, thought_panel)
+prompt_session.app.min_redraw_interval = 1 / 30
+prompt_session.app.ttimeoutlen = .05
+prompt_session.app.timeoutlen = .25
+
 try:
     prompt_session.layout.container.dont_extend_height = to_filter(True)
     for w in prompt_session.layout.find_all_windows():
@@ -351,12 +501,17 @@ except Exception:
 def _ui_animator():
     """Continuously refreshes the spinner icon while thinking without touching stdout."""
     while True:
-        if AGENT_STATE.get("is_thinking", False) and not AGENT_STATE.get("is_streaming", False) and AGENT_STATE.get("app_ref"):
-            try:
-                AGENT_STATE["app_ref"].invalidate()
-            except Exception:
-                pass
-        time.sleep(0.08)
+        _refresh_thinking_animation()
+        # The hint schedule must advance even while idle.
+        if not _thinking_active() and AGENT_STATE.get('app_ref'):
+            now_visible = shortcut_hint_visible()
+            if now_visible != AGENT_STATE.get('_hint_visible'):
+                AGENT_STATE['_hint_visible'] = now_visible
+                try:
+                    AGENT_STATE['app_ref'].invalidate()
+                except Exception:
+                    pass
+        threading.Event().wait(0.08)
 
 threading.Thread(target=_ui_animator, daemon=True).start()
 
@@ -421,7 +576,10 @@ def request_user_confirmation(prompt_text: str = "", default: str = "y", prompt_
             except Exception:
                 pass
 
-        evt.wait()
+        while not evt.wait(.05):
+            if AGENT_STATE.get('abort'):
+                AGENT_STATE['review_decision'] = 'cancel'
+                break
         decision = str(AGENT_STATE.get("review_decision", default)).strip().lower()
         AGENT_STATE["review_pending"] = False
         AGENT_STATE["review_event"] = None
@@ -439,16 +597,18 @@ def request_user_confirmation(prompt_text: str = "", default: str = "y", prompt_
         except Exception:
             return default
 
-def render_output_card(output_text: str, title: str = "Output", max_lines: int = 14):
+def render_output_card(output_text: str, title: str = "Output", max_lines: int = 14, success=None):
     """Renders a clean, transparent container displaying command or tool execution output, margin-aligned."""
     cols = shutil.get_terminal_size((44, 24)).columns
-    box_w = max(34, min(cols - 4, 48))
+    box_w = max(20, cols - 4)
     inner_w = box_w - 4
     div = "─" * (box_w - 2)
 
-    clean = (output_text or "").strip()
-    if not clean:
-        sys.stdout.write(f"\n  \033[38;5;120m✓ Tool executed successfully (exit status 0, no output)\033[0m\n\n")
+    clean = (output_text or "").strip('\n')
+    if not clean.strip():
+        label='Tool failed with no output' if success is False else 'Tool finished with no output' if success else 'Empty output'
+        color='203' if success is False else '120' if success else '244'
+        sys.stdout.write(f"\n  \033[38;5;{color}m{label}\033[0m\n\n")
         sys.stdout.flush()
         return
 
@@ -460,8 +620,8 @@ def render_output_card(output_text: str, title: str = "Output", max_lines: int =
         color = ("\033[38;5;203m" if plain.lstrip().startswith("- ") else
                  "\033[38;5;120m" if plain.lstrip().startswith("+ ") else
                  codes[0] if codes else "")
-        for part in (textwrap.wrap(plain, width=inner_w, replace_whitespace=False,
-                                   drop_whitespace=False) or [""]):
+        from ui.response_renderer import wrap_ansi
+        for part in wrap_ansi(plain,inner_w,preserve_space=True):
             lines.append(color + part + ("\033[0m" if color else ""))
     total_lines = len(lines)
     disp_lines = lines if max_lines is None else lines[:max_lines]
@@ -472,7 +632,8 @@ def render_output_card(output_text: str, title: str = "Output", max_lines: int =
     else:
         header = f"╭{div}╮"
 
-    out = f"\n  \033[38;5;242m{header}\033[0m\n"
+    header_color='203' if success is False else '81' if success else '242'
+    out = f"\n  \033[38;5;{header_color}m{header}\033[0m\n"
     for l in disp_lines:
         disp_l = l
         clean_strip = re.sub(r'\x1b\[[0-9;]*m', '', disp_l).strip()
@@ -507,73 +668,80 @@ def get_interactive_input():
         return "/exit"
 
 class StructuredThoughtStreamHandler:
+    """Display only output actually supplied by the model, plus execution phases."""
     def __init__(self, model_tag=""):
-        self.model_tag = model_tag[:20]
-        AGENT_STATE["is_thinking"] = True
-        AGENT_STATE["current_thought"] = "Analyzing query..."
-        AGENT_STATE["last_reasoning"] = ""
+        from engine.transparency import begin_generation
+        self.model_tag = model_tag
+        self.row = begin_generation(model_tag)
+        self.lock = threading.RLock()
         self.live_thought_started = False
-        self.last_topic = ""
-        self.recent_tokens = ""
-        if AGENT_STATE.get("app_ref"):
+        AGENT_STATE["active_thought_handler"] = self
+        AGENT_STATE["is_thinking"] = True
+        self.show_spinner("Waiting for model response…")
+
+    def _invalidate(self):
+        app = AGENT_STATE.get("app_ref")
+        if app:
             try:
-                AGENT_STATE["app_ref"].invalidate()
+                app.invalidate()
             except Exception:
                 pass
 
-    def show_spinner(self, msg="Analyzing query..."):
-        clean_msg = msg.strip()
-        if clean_msg:
-            AGENT_STATE["current_thought"] = clean_msg[:32]
-        if AGENT_STATE.get("app_ref"):
-            try:
-                AGENT_STATE["app_ref"].invalidate()
-            except Exception:
-                pass
+    def _close_trace(self):
+        self.live_thought_started = False
 
-    def update_thought(self, token: str):
-        self.recent_tokens += token
-        AGENT_STATE["last_reasoning"] = AGENT_STATE.get("last_reasoning", "") + token
+    def toggle(self):
+        # Visibility belongs to the shared live layout, across handler lifetimes.
+        self._invalidate()
 
-        # Extract clean 1-liner topic summary if topic changes
-        topic_triggers = ["looking", "checking", "inspecting", "analyzing", "searching", "locating", "verifying", "terminating", "running", "editing", "modifying"]
-        lower_recent = self.recent_tokens.lower()
-        for trig in topic_triggers:
-            if trig in lower_recent:
-                # Find phrase starting with trig
-                idx = lower_recent.rfind(trig)
-                phrase = self.recent_tokens[idx:idx + 32].replace("\n", " ").strip()
-                if phrase and phrase != self.last_topic:
-                    self.last_topic = phrase
-                    AGENT_STATE["current_thought"] = f"{phrase.capitalize()}"
-                    if AGENT_STATE.get("app_ref"):
-                        try:
-                            AGENT_STATE["app_ref"].invalidate()
-                        except Exception:
-                            pass
-                break
+    def show_spinner(self, msg="Receiving model output…"):
+        from engine.transparency import progress, concise
+        self.row["phase"] = msg.strip()
+        progress(msg.strip())
+        if self.row["reasoning"] and msg.startswith(('Waiting for model','Receiving model output')):
+            from engine.activity import reasoning_activity
+            AGENT_STATE['activity_label'],AGENT_STATE['current_thought'] = reasoning_activity(self.row['reasoning'])
+        self._invalidate()
 
-        # If user explicitly expanded thoughts via Ctrl+O, stream them in real time
-        if AGENT_STATE.get("show_thoughts", False):
-            if not self.live_thought_started:
-                sys.stdout.write("\n  \033[38;5;141m╭─ [Live Thought Trace (Ctrl+O to minimize)]\033[0m\n")
-                self.live_thought_started = True
-            sys.stdout.write(f"  \033[38;5;244m{token}\033[0m")
-            sys.stdout.flush()
+    def update_thought(self, token):
+        from engine.transparency import append_reasoning, safe_display, text_value
+        token = text_value(token)
+        if not token:
+            return
+        with self.lock:
+            append_reasoning(self.row, token)
+        self._invalidate()
+
+    def complete_reasoning(self, reasoning):
+        from engine.transparency import append_reasoning, safe_display, concise, progress
+        reasoning = str(reasoning or "")
+        with self.lock:
+            current = self.row["reasoning"]
+            if reasoning.strip() != current.strip():
+                if reasoning.startswith(current):
+                    self.update_thought(reasoning[len(current):])
+                else:
+                    # Canonical combined output also covers JSON/non-streaming providers.
+                    self.row["reasoning"] = ""
+                    append_reasoning(self.row, reasoning)
+                    if not current and AGENT_STATE.get("show_thoughts", False):
+                        self.toggle()
+            if not reasoning.strip():
+                progress("Model supplied no separate reasoning output")
+            else:
+                from engine.activity import reasoning_activity
+                AGENT_STATE['activity_label'],AGENT_STATE['current_thought'] = reasoning_activity(reasoning)
+        self._invalidate()
 
     def clear_on_confident_answer(self):
-        if self.live_thought_started:
-            sys.stdout.write("\n  \033[38;5;141m╰──────────────────────────────────────────\033[0m\n\n")
-            sys.stdout.flush()
-            self.live_thought_started = False
-
-        AGENT_STATE["is_thinking"] = False
-        AGENT_STATE["current_thought"] = ""
-        if AGENT_STATE.get("app_ref"):
-            try:
-                AGENT_STATE["app_ref"].invalidate()
-            except Exception:
-                pass
+        with self.lock:
+            self._close_trace()
+            self.row['phase']='Generation ended'
+        # The agent may still be inspecting/reviewing/executing after generation ends.
+        AGENT_STATE["is_thinking"] = AGENT_STATE.get("task_active", False)
+        if not AGENT_STATE["is_thinking"]:
+            AGENT_STATE["current_thought"] = ""
+        self._invalidate()
 
     def clear(self):
         self.clear_on_confident_answer()

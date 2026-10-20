@@ -1,0 +1,57 @@
+{
+  "timestamp_utc": "2026-10-20T17:33:10.878411+00:00",
+  "url": "https://agentrouter.org/v1/chat/completions",
+  "model": "deepseek-v4-flash",
+  "max_output_tokens_per_request": 16,
+  "requests": [
+    {
+      "case": "current_galam_headers",
+      "public_headers": {
+        "Content-Type": "application/json"
+      },
+      "http_status": 401,
+      "content_type": "application/json; charset=utf-8",
+      "error_type": "unauthorized_client_error",
+      "error": "unauthorized client detected, contact support for assistance at https://discord.gg/HgekCyHJqB",
+      "has_chat_response": false,
+      "seconds": 0.238
+    },
+    {
+      "case": "explicit_galam_identity",
+      "public_headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "GalamAI (Python/3.13.13; android; aarch64)",
+        "Accept": "application/json"
+      },
+      "http_status": 401,
+      "content_type": "application/json; charset=utf-8",
+      "error_type": "unauthorized_client_error",
+      "error": "unauthorized client detected, contact support for assistance at https://discord.gg/HgekCyHJqB",
+      "has_chat_response": false,
+      "seconds": 0.231
+    },
+    {
+      "case": "explicit_galam_app_metadata",
+      "public_headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "GalamAI (Python/3.13.13; android; aarch64)",
+        "Accept": "application/json",
+        "originator": "galamaicli",
+        "X-Title": "Galam.AI",
+        "HTTP-Referer": "https://github.com/Johnbenser/galamaicli"
+      },
+      "http_status": 401,
+      "content_type": "application/json; charset=utf-8",
+      "error_type": "unauthorized_client_error",
+      "error": "unauthorized client detected, contact support for assistance at https://discord.gg/HgekCyHJqB",
+      "has_chat_response": false,
+      "seconds": 0.239
+    }
+  ],
+  "production_files_changed": false,
+  "interpretation": "All tested truthful Galam identities were rejected by client admission. Key validity, model availability, streaming and native-tool support remain unverified.",
+  "research_sources": [
+    "https://github.com/lidge-jun/opencodex/issues/2717",
+    "https://agentrouter.org/docs/opencode.html"
+  ]
+}

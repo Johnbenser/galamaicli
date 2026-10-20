@@ -1,0 +1,1073 @@
+{
+  "models_attempted": 42,
+  "models_verified_all_three": 13,
+  "models": [
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": false,
+        "bash": true
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/01-cloudflare/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/01-cloudflare/result.json",
+      "best_seconds": 168.95,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": false,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/01-cloudflare/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/01-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/qwen/qwen2.5-coder-32b-instruct",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/recheck-cloudflare-qwen/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/02-cloudflare/result.json",
+      "best_seconds": 50.35,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": false,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/02-cloudflare/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/recheck-cloudflare-qwen/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/02-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/qwen/qwen3.8-27b",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/03-cloudflare/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/03-cloudflare/result.json",
+      "best_seconds": 75.02,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/03-cloudflare/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/03-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/zai-org/glm-4.7-flash",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/04-cloudflare/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/04-cloudflare/result.json",
+      "best_seconds": 75.04,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/04-cloudflare/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/04-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/05-cloudflare/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/05-cloudflare/result.json",
+      "best_seconds": 37.4,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/05-cloudflare/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/05-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "Cloudflare",
+      "model": "@cf/mistral/mistral-7b-instruct-v0.2-lora",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily Cloudflare neuron allowance exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/06-cloudflare/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/06-cloudflare/result.json",
+      "best_seconds": 36.73,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/06-cloudflare/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/06-cloudflare/result.json",
+          "passed": false,
+          "issue": "Daily Cloudflare neuron allowance exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "deepseek-ai/deepseek-v4.1-flash",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Stage deadline exceeded; incomplete",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/07-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/07-nvidia/result.json",
+      "best_seconds": 75.04,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/07-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/07-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "z-ai/glm-5.3",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Stage deadline exceeded; incomplete",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/08-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/08-nvidia/result.json",
+      "best_seconds": 75.04,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/08-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/08-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "z-ai/glm-5.3-flash",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/recovery-glm-flash/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/recovery-glm-flash/result.json",
+      "best_seconds": 103.98,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/09-nvidia/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/09-nvidia/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create, modify)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/recovery-glm-flash/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "moonshotai/kimi-k3",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider reports model retired (HTTP 410)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/10-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/10-nvidia/result.json",
+      "best_seconds": 0.27,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/10-nvidia/result.json",
+          "passed": false,
+          "issue": "Provider reports model retired (HTTP 410)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/10-nvidia/result.json",
+          "passed": false,
+          "issue": "Provider reports model retired (HTTP 410)"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/11-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/11-nvidia/result.json",
+      "best_seconds": 15.22,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/11-nvidia/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/11-nvidia/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/12-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/12-nvidia/result.json",
+      "best_seconds": 23.68,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/12-nvidia/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/12-nvidia/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "poolside/laguna-xs-2.1",
+      "verified": false,
+      "stages": {
+        "create": false,
+        "modify": true,
+        "bash": false
+      },
+      "issue": "Quota/rate/capacity limit; not proof of model inability",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/13-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/13-nvidia/result.json",
+      "best_seconds": 133.12,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/13-nvidia/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/13-nvidia/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        }
+      ]
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "google/gemma-4-31b-it",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Stage deadline exceeded; incomplete",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/14-nvidia/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/14-nvidia/result.json",
+      "best_seconds": 75.03,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/14-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/14-nvidia/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "nvidia/nemotron-3.5-lightning:free",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": false,
+        "bash": true
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/15-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/15-openrouter/result.json",
+      "best_seconds": 26.0,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/15-openrouter/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (modify)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/15-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/16-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/16-openrouter/result.json",
+      "best_seconds": 0.33,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/16-openrouter/result.json",
+          "passed": false,
+          "issue": "Model/provider route unavailable or inaccessible (HTTP 404)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/16-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/17-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/17-openrouter/result.json",
+      "best_seconds": 43.59,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/17-openrouter/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/17-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "cohere/north-mini-code:free",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": false,
+        "bash": true
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/18-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/18-openrouter/result.json",
+      "best_seconds": 96.99,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/18-openrouter/result.json",
+          "passed": false,
+          "issue": "Stage deadline exceeded; incomplete"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/18-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "liquid/lfm-2.5-2.6b:free",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": false,
+        "bash": false
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/19-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/19-openrouter/result.json",
+      "best_seconds": 121.94,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/19-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/19-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "dots-studio/dots-3-note-preview:free",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Daily OpenRouter free-request quota exhausted",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/20-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/20-openrouter/result.json",
+      "best_seconds": 29.95,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/20-openrouter/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (create)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/20-openrouter/result.json",
+          "passed": false,
+          "issue": "Daily OpenRouter free-request quota exhausted"
+        }
+      ]
+    },
+    {
+      "endpoint": "OpenRouter",
+      "model": "poolside/laguna-xs-2.1:free",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Quota/rate/capacity limit; not proof of model inability",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/21-openrouter/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/21-openrouter/result.json",
+      "best_seconds": 0.49,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/21-openrouter/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        }
+      ]
+    },
+    {
+      "endpoint": "Groq",
+      "model": "openai/gpt-oss-120b",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/21-groq/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/21-groq/result.json",
+      "best_seconds": 185.05,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/22-groq/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/21-groq/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Groq",
+      "model": "openai/gpt-oss-20b",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/22-groq/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/22-groq/result.json",
+      "best_seconds": 105.16,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/23-groq/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/22-groq/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Groq",
+      "model": "qwen/qwen3.8-27b",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/23-groq/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/23-groq/result.json",
+      "best_seconds": 185.07,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/24-groq/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/23-groq/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "ModelScope",
+      "model": "Qwen/Qwen3.8-27B",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Account setup: provider requires Alibaba Cloud account binding",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/25-modelscope/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/25-modelscope/result.json",
+      "best_seconds": 4.52,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/25-modelscope/result.json",
+          "passed": false,
+          "issue": "Account setup: provider requires Alibaba Cloud account binding"
+        }
+      ]
+    },
+    {
+      "endpoint": "ModelScope",
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Account setup: provider requires Alibaba Cloud account binding",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/26-modelscope/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/26-modelscope/result.json",
+      "best_seconds": 1.75,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/26-modelscope/result.json",
+          "passed": false,
+          "issue": "Account setup: provider requires Alibaba Cloud account binding"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "gemini-3.5-flash",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/24-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/24-direct/result.json",
+      "best_seconds": 81.06,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/27-direct/result.json",
+          "passed": false,
+          "issue": "Provider temporarily unavailable (HTTP 503)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/24-direct/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "gemini-3.5-flash-lite",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider rejected request parameters (HTTP 400)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/28-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/28-direct/result.json",
+      "best_seconds": 0.99,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/28-direct/result.json",
+          "passed": false,
+          "issue": "Provider rejected request parameters (HTTP 400)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "gemini-2.5-flash",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/25-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/25-direct/result.json",
+      "best_seconds": 37.29,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/29-direct/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/25-direct/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "gemini-3.8-flash",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider temporarily unavailable (HTTP 503)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/30-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/30-direct/result.json",
+      "best_seconds": 35.02,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/30-direct/result.json",
+          "passed": false,
+          "issue": "Provider temporarily unavailable (HTTP 503)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "command-a-plus-07-2025",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Model/provider route unavailable or inaccessible (HTTP 404)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/31-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/31-direct/result.json",
+      "best_seconds": 0.47,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/31-direct/result.json",
+          "passed": false,
+          "issue": "Model/provider route unavailable or inaccessible (HTTP 404)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "north-mini-code-1-0",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider generated no valid response (HTTP 422)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/32-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/32-direct/result.json",
+      "best_seconds": 4.35,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/32-direct/result.json",
+          "passed": false,
+          "issue": "Provider generated no valid response (HTTP 422)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "command-a-plus-05-2026",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider generated no valid response (HTTP 422)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/33-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/33-direct/result.json",
+      "best_seconds": 6.95,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/33-direct/result.json",
+          "passed": false,
+          "issue": "Provider generated no valid response (HTTP 422)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "codestral-latest",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/34-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/34-direct/result.json",
+      "best_seconds": 8.65,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/34-direct/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "mistral-14b-latest",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Configured model ID rejected (HTTP 400)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/35-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/35-direct/result.json",
+      "best_seconds": 0.49,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/35-direct/result.json",
+          "passed": false,
+          "issue": "Configured model ID rejected (HTTP 400)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "mistral-8b-latest",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Configured model ID rejected (HTTP 400)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/36-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/36-direct/result.json",
+      "best_seconds": 0.49,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/36-direct/result.json",
+          "passed": false,
+          "issue": "Configured model ID rejected (HTTP 400)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "mistral-3b-latest",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Configured model ID rejected (HTTP 400)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/37-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/37-direct/result.json",
+      "best_seconds": 0.54,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/37-direct/result.json",
+          "passed": false,
+          "issue": "Configured model ID rejected (HTTP 400)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "mistral-large-latest",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/38-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/38-direct/result.json",
+      "best_seconds": 14.55,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/38-direct/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "anthropic/claude-sonnet-4.5",
+      "verified": false,
+      "stages": {
+        "create": false
+      },
+      "issue": "Provider requires credits/payment (HTTP 402)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/39-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/39-direct/result.json",
+      "best_seconds": 0.55,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/39-direct/result.json",
+          "passed": false,
+          "issue": "Provider requires credits/payment (HTTP 402)"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "kilo-auto/free",
+      "verified": true,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": true
+      },
+      "issue": "All three checks passed",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/40-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-final/40-direct/result.json",
+      "best_seconds": 32.84,
+      "latest_complete": true,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/40-direct/result.json",
+          "passed": true,
+          "issue": "All three checks passed"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "minimax-m2.7",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": true,
+        "bash": false
+      },
+      "issue": "Quota/rate/capacity limit; not proof of model inability",
+      "best_evidence": "artifacts/remote-action-audit-20261020-recheck/26-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/26-direct/result.json",
+      "best_seconds": 55.62,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": null,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/41-direct/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/26-direct/result.json",
+          "passed": false,
+          "issue": "Quota/rate/capacity limit; not proof of model inability"
+        }
+      ]
+    },
+    {
+      "endpoint": "Direct",
+      "model": "mistral-Nemo-Instruct-2407",
+      "verified": false,
+      "stages": {
+        "create": true,
+        "modify": false,
+        "bash": true
+      },
+      "issue": "Workflow incomplete; attempted an action outside the test contract (create, modify)",
+      "best_evidence": "artifacts/remote-action-audit-20261020-final/42-direct/result.json",
+      "latest_evidence": "artifacts/remote-action-audit-20261020-recheck/27-direct/result.json",
+      "best_seconds": 37.85,
+      "latest_complete": false,
+      "bash_acknowledgment_contains_actual_count": true,
+      "history": [
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-final/42-direct/result.json",
+          "passed": false,
+          "issue": "Workflow/protocol incomplete (modify)"
+        },
+        {
+          "evidence": "artifacts/remote-action-audit-20261020-recheck/27-direct/result.json",
+          "passed": false,
+          "issue": "Workflow incomplete; attempted an action outside the test contract (create, modify)"
+        }
+      ]
+    }
+  ]
+}

@@ -68,19 +68,10 @@ def parse_reasoning_and_content(raw_text: str) -> Tuple[str, str]:
     Separates <thought> or <think> reasoning blocks from the main response.
     Returns: (reasoning_text, clean_content)
     """
-    reasoning_blocks = []
-    
-    # 1. Match <thought>...</thought>
-    thought_matches = re.findall(r'<thought>(.*?)</thought>', raw_text, re.DOTALL | re.IGNORECASE)
-    for tm in thought_matches:
-        reasoning_blocks.append(tm.strip())
-    clean_text = re.sub(r'<thought>.*?</thought>', '', raw_text, flags=re.DOTALL | re.IGNORECASE)
-
-    # 2. Match <think>...</think>
-    think_matches = re.findall(r'<think>(.*?)</think>', clean_text, re.DOTALL | re.IGNORECASE)
-    for tkm in think_matches:
-        reasoning_blocks.append(tkm.strip())
-    clean_text = re.sub(r'<think>.*?</think>', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    from engine.transparency import ReasoningStream
+    stream = ReasoningStream()
+    clean_text, explicit_reason = stream.feed(raw_text, final=True)
+    reasoning_blocks = [explicit_reason.strip()] if explicit_reason.strip() else []
 
     # 3. Untagged R1 Internal Monologue Heuristic:
     # If the response begins with an internal monologue (e.g. "Okay, so the user wants me to...")
@@ -224,164 +215,23 @@ def ansi_wrap(text: str, width: int) -> list:
     return lines
 
 def _inline_format(text: str) -> str:
-    """Apply inline markdown formatting: `code`, **bold**, *italic*."""
-    # Inline code: `...` -> styled code
-    text = re.sub(r'`([^`]+)`', r'\033[38;5;222m\1\033[38;5;253m', text)
-    # Bold+italic: ***...***
-    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'\033[1;3;38;5;255m\1\033[0;38;5;253m', text)
-    # Bold: **...** or __...__
-    text = re.sub(r'\*\*(.+?)\*\*', r'\033[1;38;5;255m\1\033[0;38;5;253m', text)
-    text = re.sub(r'__(.+?)__', r'\033[1;38;5;255m\1\033[0;38;5;253m', text)
-    # Italic: *...* or _..._
-    text = re.sub(r'\*(.+?)\*', r'\033[3;38;5;250m\1\033[0;38;5;253m', text)
-    return text
+    """Format prose while keeping inline code (including filenames) literal."""
+    def prose(value):
+        value = re.sub(r'\*\*\*(.+?)\*\*\*', lambda m: "\033[1;3;38;5;255m"+m[1]+"\033[0;38;5;253m", value)
+        value = re.sub(r'\*\*(.+?)\*\*', lambda m: "\033[1;38;5;255m"+m[1]+"\033[0;38;5;253m", value)
+        value = re.sub(r'__(.+?)__', lambda m: "\033[1;38;5;255m"+m[1]+"\033[0;38;5;253m", value)
+        return re.sub(r'\*(.+?)\*', lambda m: "\033[3;38;5;250m"+m[1]+"\033[0;38;5;253m", value)
+    pieces=[];start=0
+    for match in re.finditer(r'(`+)(.+?)\1',text):
+        pieces.extend([prose(text[start:match.start()]),"\033[38;5;222m"+match[2]+"\033[38;5;253m"])
+        start=match.end()
+    pieces.append(prose(text[start:]))
+    return ''.join(pieces)
+
 
 def render_markdown_response(text: str, indent: str = "  ") -> str:
-    """
-    Convert markdown text to rich ANSI-colored terminal output (AGY-style).
-    Handles: headers (###), bold, inline code, code blocks, bullets with hanging indents, hr.
-    Returns a string ready to be written to sys.stdout.
-    """
-    import shutil
-    cols = shutil.get_terminal_size((44, 24)).columns
-    wrap_w = max(24, cols - len(indent) - 2)
-
-    # Strip tool markup first
-    text = clean_response_text(text)
-    if not text:
-        return ""
-
-    lines = text.splitlines()
-    out_lines = []
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-
-        # --- Fenced code block ```...``` ---
-        if line.strip().startswith("```"):
-            lang = line.strip()[3:].strip()
-            lang_label = f": {lang}" if lang else ""
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].strip().startswith("```"):
-                code_lines.append(lines[i])
-                i += 1
-            i += 1  # consume closing ```
-            box_w = min(wrap_w + 2, 44)
-            hdr = f"╭─[code{lang_label}]"
-            bar = "─" * max(0, box_w - len(hdr) - 1)
-            bot_bar = "─" * (box_w - 2)
-            out_lines.append(f"{indent}\033[38;5;238m{hdr}{bar}╮\033[0m")
-            for cl in code_lines:
-                disp = cl[:box_w - 4] if len(cl) > box_w - 4 else cl
-                pad_r = " " * max(0, box_w - 4 - len(disp))
-                out_lines.append(f"{indent}\033[38;5;238m│\033[0m \033[38;5;222m{disp}{pad_r}\033[0m \033[38;5;238m│\033[0m")
-            out_lines.append(f"{indent}\033[38;5;238m╰{bot_bar}╯\033[0m")
-            continue
-
-        # --- Horizontal rule --- or *** or ___
-        if re.match(r'^(\-{3,}|\*{3,}|_{3,})\s*$', line.strip()):
-            rule = "─" * wrap_w
-            out_lines.append(f"{indent}\033[38;5;238m{rule}\033[0m")
-            i += 1
-            continue
-
-        # --- Heading: # ## ### #### ---
-        heading_m = re.match(r'^(#{1,6})\s+(.*)', line)
-        if heading_m:
-            level = len(heading_m.group(1))
-            h_prefix = heading_m.group(1)
-            title = heading_m.group(2).strip()
-            if level == 1:
-                styled_prefix = "\033[1;38;5;75m"
-                u_color = "38;5;75"
-            elif level == 2:
-                styled_prefix = "\033[1;38;5;123m"
-                u_color = "38;5;123"
-            elif level == 3:
-                styled_prefix = "\033[1;38;5;141m"
-                u_color = "38;5;141"
-            else:
-                styled_prefix = "\033[1;38;5;255m"
-                u_color = None
-
-            out_lines.append("")
-            formatted_title = f"{h_prefix} {_inline_format(title)}"
-            w_titles = ansi_wrap(f"{styled_prefix}{formatted_title}\033[0m", wrap_w)
-            for wt in w_titles:
-                out_lines.append(f"{indent}{wt}")
-            if u_color:
-                u_len = min(visible_len(w_titles[0]) + 2, wrap_w)
-                u_bar = "─" * u_len
-                out_lines.append(f"{indent}\033[{u_color}m{u_bar}\033[0m")
-            i += 1
-            continue
-
-        # --- Bullet list: - or * or + ---
-        bullet_m = re.match(r'^(\s*)[-*+]\s+(.*)', line)
-        if bullet_m:
-            pad = bullet_m.group(1)
-            raw_content = bullet_m.group(2)
-            depth = len(pad) // 2
-            dot = ["•", "◦", "▸"][min(depth, 2)]
-            color = ["38;5;120", "38;5;75", "38;5;244"][min(depth, 2)]
-            content_w = max(18, wrap_w - len(pad) - 2)
-            formatted = _inline_format(raw_content)
-            w_chunks = ansi_wrap(f"\033[38;5;253m{formatted}\033[0m", content_w)
-            if not w_chunks:
-                w_chunks = [""]
-            out_lines.append(f"{indent}{pad}\033[{color}m{dot}\033[0m {w_chunks[0]}")
-            for sub_c in w_chunks[1:]:
-                out_lines.append(f"{indent}{pad}  {sub_c}")
-            i += 1
-            continue
-
-        # --- Numbered list: 1. 2. etc ---
-        num_m = re.match(r'^(\s*)(\d+)[.)]\s+(.*)', line)
-        if num_m:
-            pad = num_m.group(1)
-            num = num_m.group(2)
-            raw_content = num_m.group(3)
-            num_indent = " " * (len(num) + 2)
-            content_w = max(18, wrap_w - len(pad) - len(num) - 2)
-            formatted = _inline_format(raw_content)
-            w_chunks = ansi_wrap(f"\033[38;5;253m{formatted}\033[0m", content_w)
-            if not w_chunks:
-                w_chunks = [""]
-            out_lines.append(f"{indent}{pad}\033[38;5;220m{num}.\033[0m {w_chunks[0]}")
-            for sub_c in w_chunks[1:]:
-                out_lines.append(f"{indent}{pad}{num_indent}{sub_c}")
-            i += 1
-            continue
-
-        # --- Blank line ---
-        if not line.strip():
-            out_lines.append("")
-            i += 1
-            continue
-
-        # --- Regular paragraph or indented line ---
-        formatted = _inline_format(line)
-        leading_spaces = len(line) - len(line.lstrip())
-        if leading_spaces > 0:
-            indent_prefix = " " * leading_spaces
-            w_paras = ansi_wrap(f"\033[38;5;253m{formatted.strip()}\033[0m", max(18, wrap_w - leading_spaces))
-            for wp in w_paras:
-                out_lines.append(f"{indent}{indent_prefix}{wp}")
-        else:
-            w_paras = ansi_wrap(f"\033[38;5;253m{formatted}\033[0m", wrap_w)
-            for wp in w_paras:
-                out_lines.append(f"{indent}{wp}")
-        i += 1
-
-    # Remove leading/trailing blank lines
-    while out_lines and out_lines[0] == "":
-        out_lines.pop(0)
-    while out_lines and out_lines[-1] == "":
-        out_lines.pop()
-
-    return "\n".join(out_lines)
+    from ui.response_renderer import render
+    return render(text, indent)
 
 
 from engine.tool_registry import TOOLS
@@ -665,8 +515,9 @@ def normalize_inbound_actions(text: str, reasoning: str = "") -> List[AgentActio
         return actions
 
     # Format 5: Functional syntax: bash(command='...') or execute_bash(command="...") or view_file(path="...")
-    func_starts = list(re.finditer(r'(?<![\w.])(execute_bash|bash|view_file|write_file|replace_file_content|search_files|manage_tasks)\s*\(', text_content))
+    func_starts = list(re.finditer(r'(?<![\w.])(make_directory|execute_bash|bash|view_file|write_file|replace_file_content|search_files|manage_tasks)\s*\(', text_content))
     positional = {
+        "make_directory": ("path",),
         "execute_bash": ("command", "reason"), "bash": ("command", "reason"),
         "view_file": ("path", "start_line", "end_line"),
         "write_file": ("path", "content", "overwrite"),

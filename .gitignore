@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+.secrets
+.secrets.*
 *.pem
 *.key
 .galam_keys*
@@ -13,6 +15,7 @@ logs/
 conversations/
 .galam/
 *.log
+artifacts/remote-action-audit-*/
 
 # Python caches and local environments
 __pycache__/
@@ -26,3 +29,6 @@ env/
 *.gguf
 *.safetensors
 .DS_Store
+
+# Local source bundles can contain stale credentials or personal runtime data
+/GalamAICLI.zip

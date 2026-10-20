@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 from config import CONFIG, save_settings, AGENT_STATE
 from storage.endpoints import ENDPOINT_REGISTRY
+from storage.conversations import (load_history as load_chat_history, save_history as save_chat_history,
+                                   bind_messages, conversation_plan, OWNER, PLAN, history_directory)
 from routers.manager import query_with_fallback, query_subagent
 from ui.dock_layout import (
     get_interactive_input,
@@ -56,6 +58,8 @@ from engine.lang_workflow import is_available as lang_workflow_available, query_
 from engine.action_results import requires_content, as_result, request_intent
 from engine.action_recovery import recover_requested_read, announces_read
 from engine.completion import action_acknowledgment, completed_simple_request
+from engine.message_queue import MessageQueue
+from engine.cancellation import cancel_current, TaskCancelled
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -65,29 +69,42 @@ from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.filters import to_filter
 
-CONV_DIR = os.path.expanduser("~/.galam_conversations")
+CONV_DIR = history_directory()
 os.makedirs(CONV_DIR, exist_ok=True)
 
 def load_conversation(conv_id):
-    path = os.path.join(CONV_DIR, f"{conv_id}.json")
-    if os.path.exists(path):
-        try:
-            with open(path, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
+    return load_chat_history(CONV_DIR, conv_id)
 
 def persist_conversation(conv_id, msgs):
-    path = os.path.join(CONV_DIR, f"{conv_id}.json")
     try:
-        with open(path, "w") as f:
-            json.dump(msgs, f, indent=2)
-    except Exception:
+        if msgs:
+            msgs[-1]['_galam_working_directory'] = session_directory()
+        save_chat_history(CONV_DIR, conv_id, msgs)
+    except OSError:
         pass
 
 def save_history():
     pass
+
+
+def display_resumed_history(messages):
+    from engine.context_manager import is_user_request
+    from engine.transparency import safe_display
+    from engine.response_stats import KEY,footer
+    turns = [m for m in messages if is_user_request(m) or
+             (m.get('role') == 'assistant' and m.get('content') and not m.get('_galam_tool_calls'))]
+    print(f'\nResumed conversation: {len(turns)} messages. Showing the latest {min(20,len(turns))}; full context retained.\n')
+    for message in turns[-20:]:
+        label = 'You' if message['role'] == 'user' else 'Galam'
+        body = str(message.get('content',''))
+        if label == 'Galam':
+            body = render_markdown_response(clean_response_text(body))
+        else:
+            body = safe_display(body)
+        print(f'{label}:\n{body}\n')
+        if message.get(KEY):
+            print(footer(message[KEY])+'\n')
+
 
 def print_banner(session_id):
     cols = shutil.get_terminal_size((44, 24)).columns
@@ -154,128 +171,31 @@ def handle_tasks_command(arg: str = ""):
     sys.stdout.write("\033[38;5;244mTo stop a task: /tasks kill <id|all>\033[0m\n\n")
     sys.stdout.flush()
 
+_BTW_SESSION = None
+
+
+def close_btw():
+    global _BTW_SESSION
+    if _BTW_SESSION is not None:
+        _BTW_SESSION.close()
+        _BTW_SESSION = None
+    AGENT_STATE['in_btw_mode'] = False
+    AGENT_STATE.pop('close_btw', None)
+
+
 def handle_btw_command(initial_query=""):
-    subagent_id = f"subagent-{uuid.uuid4().hex[:6]}"
+    global _BTW_SESSION
+    from engine.btw_session import BtwSession
+    if _BTW_SESSION is None or _BTW_SESSION.cancelled.is_set():
+        _BTW_SESSION = BtwSession(query_subagent)
+        print('\n\033[1;35m⬡ /btw\033[0m · Esc closes the side chat; main task continues.\n')
+    AGENT_STATE['in_btw_mode'] = True
+    AGENT_STATE['close_btw'] = close_btw
+    if initial_query.strip():
+        _BTW_SESSION.submit(initial_query)
+    if AGENT_STATE.get('app_ref'):
+        AGENT_STATE['app_ref'].invalidate()
 
-    sub_entry = {
-        "id": subagent_id,
-        "start_time": time.time(),
-        "elapsed": 0,
-        "task": "btw-incubator"
-    }
-
-    if "active_subagents" not in AGENT_STATE:
-        AGENT_STATE["active_subagents"] = []
-    AGENT_STATE["active_subagents"].append(sub_entry)
-
-    if AGENT_STATE.get("app_ref"):
-        try:
-            AGENT_STATE["app_ref"].invalidate()
-        except Exception:
-            pass
-
-    cols = shutil.get_terminal_size((44, 24)).columns
-    div = "─" * min(cols - 4, 40)
-
-    sub_messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an agile sub-agent within Galam.AI answering inquiries in an isolated incubator container. "
-                "Keep answers direct, structured, helpful, and natural. Do not produce verbose internal monologues."
-            )
-        }
-    ]
-
-    sys.stdout.write(f"\n\033[38;5;238m╭─ \033[1;35m⬡ [Sub-Agent Incubator: btw]\033[0m \033[38;5;244m({subagent_id})\033[0m\n")
-    sys.stdout.write(f"\033[38;5;238m│ \033[38;5;244mType questions below · Press [Esc] to close container\033[0m\n")
-    sys.stdout.write(f"\033[38;5;238m│ {div}\033[0m\n")
-    sys.stdout.flush()
-
-    kb_btw = KeyBindings()
-    @kb_btw.add('escape')
-    @kb_btw.add('c-c')
-    def _esc_btw(event):
-        event.app.exit(result=None)
-
-    session_btw = PromptSession(key_bindings=kb_btw)
-
-    first_round = True
-    next_query = initial_query.strip() if initial_query else ""
-
-    try:
-        while True:
-            if first_round and next_query:
-                user_q = next_query
-                first_round = False
-                sys.stdout.write(f"\033[38;5;238m│ \033[38;5;250mQuery:\033[0m  \033[1;37m{user_q}\033[0m\n")
-            else:
-                first_round = False
-                try:
-                    with patch_stdout(raw=True):
-                        prompt_html = HTML("<style fg='#a855f7'>│ </style><style fg='#38bdf8'><b>btw&gt;</b> </style>")
-                        user_q = session_btw.prompt(prompt_html)
-                except (KeyboardInterrupt, EOFError):
-                    break
-
-                if user_q is None:
-                    break
-
-                user_q = user_q.strip()
-                if not user_q:
-                    continue
-
-                if user_q.lower() in ("/exit", "/quit", "exit", "quit"):
-                    break
-
-            sys.stdout.write(f"\033[38;5;238m│ \033[38;5;220mStatus: ≡ Thinking... (0s)\033[0m\n")
-            sys.stdout.flush()
-
-            is_done = threading.Event()
-            start_time = time.time()
-
-            def _ticker():
-                while not is_done.is_set():
-                    elapsed = int(time.time() - start_time)
-                    sub_entry["elapsed"] = elapsed
-                    sys.stdout.write(f"\033[1A\r\033[38;5;238m│ \033[38;5;220mStatus: ≡ Thinking... ({elapsed}s)\033[0m\n")
-                    sys.stdout.flush()
-                    if AGENT_STATE.get("app_ref"):
-                        try:
-                            AGENT_STATE["app_ref"].invalidate()
-                        except Exception:
-                            pass
-                    time.sleep(0.5)
-
-            t = threading.Thread(target=_ticker, daemon=True)
-            t.start()
-
-            sub_messages.append({"role": "user", "content": user_q})
-            answer = query_subagent(sub_messages)
-            sub_messages.append({"role": "assistant", "content": answer})
-
-            is_done.set()
-            t.join(timeout=0.3)
-            total_time = round(time.time() - start_time, 1)
-
-            sys.stdout.write(f"\033[1A\r\033[2K\033[38;5;238m│ \033[1;32mStatus: ✓ Concluded ({total_time}s)\033[0m\n")
-            sys.stdout.write(f"\033[38;5;238m│ {div}\033[0m\n")
-            for line in answer.splitlines():
-                sys.stdout.write(f"\033[38;5;238m│\033[0m  \033[1;37m{line}\033[0m\n")
-            sys.stdout.write(f"\033[38;5;238m│ {div}\033[0m\n")
-            sys.stdout.flush()
-
-    finally:
-        if sub_entry in AGENT_STATE.get("active_subagents", []):
-            AGENT_STATE["active_subagents"].remove(sub_entry)
-        if AGENT_STATE.get("app_ref"):
-            try:
-                AGENT_STATE["app_ref"].invalidate()
-            except Exception:
-                pass
-
-        sys.stdout.write(f"\033[38;5;238m╰──────────────────────────────────────────\033[0m \033[38;5;244m[Closed /btw]\033[0m\n\n")
-        sys.stdout.flush()
 
 def handle_plan_command(arg: str, messages: list, conversation_id: str):
     task_desc = arg.strip()
@@ -310,14 +230,16 @@ def handle_plan_command(arg: str, messages: list, conversation_id: str):
     # Save as artifact
     artifacts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
     os.makedirs(artifacts_dir, exist_ok=True)
-    plan_filename = f"plan_{time.strftime('%Y%m%d_%H%M%S')}.md"
+    plan_filename = f"plan_{hashlib.sha256(str(conversation_id).encode()).hexdigest()[:12]}_{time.time_ns()}.md"
     plan_path = os.path.join(artifacts_dir, plan_filename)
     
     with open(plan_path, "w", encoding="utf-8") as f:
         f.write(resp)
 
     AGENT_STATE["last_plan_path"] = plan_path
-    messages.append({"role": "assistant", "content": f"Created an implementation plan for {task_desc}. Saved to {plan_path}."})
+    messages.append({"role": "assistant", "content": f"Created an implementation plan for {task_desc}. Saved to {plan_path}.",
+                     OWNER: str(conversation_id), PLAN: plan_path})
+    persist_conversation(conversation_id, messages)
 
     sys.stdout.write(f"\033[1;32m✓ Plan generated and saved to artifacts/{plan_filename}\033[0m\n\n")
     for line in resp.splitlines():
@@ -368,12 +290,12 @@ def handle_approved_plan_request(user_input: str, messages: list, conversation_i
             re.search(r'\bbuild\b', user_input, re.IGNORECASE)):
         return False
     artifacts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
-    plans = sorted(glob.glob(os.path.join(artifacts_dir, "plan_*.md")), key=os.path.getmtime, reverse=True)
-    if not plans:
-        sys.stdout.write("\n  Incomplete: no saved implementation plan was found. Use /plan first.\n\n")
+    plan_path = conversation_plan(messages, conversation_id, artifacts_dir)
+    if plan_path is None:
+        sys.stdout.write("\n  Incomplete: no saved implementation plan was found in this conversation. Use /plan first.\n\n")
         sys.stdout.flush()
         return True
-    with open(plans[0], encoding="utf-8") as plan_file:
+    with open(plan_path, encoding="utf-8") as plan_file:
         plan = plan_file.read()
     if not is_actionable_plan(plan):
         sys.stdout.write("\n  Incomplete: the saved plan lacks concrete files and steps. Generate a new /plan.\n\n")
@@ -388,13 +310,13 @@ def handle_approved_plan_request(user_input: str, messages: list, conversation_i
                 summary = f"Success: school parking ticket prototype is ready at {project}. {check.stdout.strip()}"
             else:
                 summary = f"Incomplete: project exists but verification failed: {check.stderr.strip()[:500]}"
-            sys.stdout.write(f"\n  {summary}\n  Plan: {plans[0]}\n\n")
+            sys.stdout.write(f"\n  {summary}\n  Plan: {plan_path}\n\n")
             sys.stdout.flush()
             messages.extend([{"role": "user", "content": user_input}, {"role": "assistant", "content": summary}])
             persist_conversation(conversation_id, messages)
             return True
     approved_request = (
-        f"{user_input}\n\nApproved implementation plan ({plans[0]}):\n{plan}\n\n"
+        f"{user_input}\n\nApproved implementation plan ({plan_path}):\n{plan}\n\n"
         "Implement the files specified in this plan. Inspect the target directory, then use write_file or "
         "replace_file_content for actual source files. Do not execute example placeholders."
     )
@@ -439,6 +361,9 @@ def handle_slash_command(user_input, messages, conversation_id):
         handle_settings_menu()
         sys.stdout.write("\n\033[38;5;244m[Settings updated · Chat session preserved]\033[0m\n\n")
         sys.stdout.flush()
+    elif cmd == "/local":
+        from engine.local_commands import handle_local_command
+        handle_local_command(arg)
     elif cmd == "/model":
         handle_model_menu()
         sys.stdout.write("\n\033[38;5;244m[Model updated · Chat session preserved]\033[0m\n\n")
@@ -465,6 +390,12 @@ def handle_slash_command(user_input, messages, conversation_id):
         handle_plan_command(arg, messages, conversation_id)
     elif cmd == "/artifact":
         handle_artifact_command(arg)
+    elif cmd == "/changelog":
+        path=Path(__file__).resolve().parent/'CHANGELOG.md'
+        if path.is_file():
+            print('\n'+render_markdown_response(path.read_text(encoding='utf-8'))+'\n')
+        else:
+            print('\nNo changelog is available in this checkout.\n')
     elif cmd == "/clear":
         os.system("clear")
         print_banner(conversation_id)
@@ -485,8 +416,19 @@ def handle_slash_command(user_input, messages, conversation_id):
         print(f"  Directory: {AGENT_STATE.get('working_directory', os.getcwd())}")
         print(f"  Stream:   {'ON' if stream else 'OFF'}\n")
     elif cmd == "/cancel":
-        AGENT_STATE["abort"] = True
+        cancel_current()
         print("\n\033[1;33m[!] Active generation cancelled.\033[0m\n")
+    elif cmd == '/queue':
+        if arg.strip() == 'clear':
+            print(f'\nRemoved {TASK_QUEUE.clear()} queued prompt(s).\n')
+        else:
+            pending = AGENT_STATE.get('queued_messages') or []
+            print('\nQueued prompts (FIFO):')
+            from engine.transparency import safe_display
+            for n,item in enumerate(pending,1):
+                print(f"  {n}. {safe_display(item['text'])[:160]}")
+            print('  No pending prompts.' if not pending else 'Use /queue clear to remove pending prompts.')
+            print()
     elif cmd in ("/exit", "/quit"):
         sys.exit(0)
 
@@ -502,7 +444,10 @@ def request_tool_review(cmd_preview: str, title: str = "Approval Required") -> s
             pass
 
     # Wait for user input via the stagnant prompt
-    AGENT_STATE["review_event"].wait()
+    while not AGENT_STATE["review_event"].wait(.05):
+        if AGENT_STATE.get('abort'):
+            AGENT_STATE['review_decision'] = 'cancel'
+            break
     decision = str(AGENT_STATE.get("review_decision") or "cancel").strip().lower()
     AGENT_STATE["review_pending"] = False
     AGENT_STATE["review_event"] = None
@@ -619,7 +564,14 @@ def _is_observation_echo(text):
         "[tool observation for",
     ))
 
+from engine.transparency import task_lifecycle, progress
+from engine.tool_protocol import ActionRepair, needs_clarification
+from engine.task_contract import TaskContract
+
+
+@task_lifecycle
 def run_agent_loop(messages, conversation_id, max_steps=None):
+    bind_messages(messages, conversation_id)
     if max_steps is None:
         max_steps = int(CONFIG.get("max_iterations", 25))
     step = 0
@@ -632,14 +584,27 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
     current_request = next((str(m.get("content", "")) for m in reversed(messages)
                             if m.get("role") == "user"), "")
     action_requested, code_change_requested = request_intent(current_request)
+    from engine.context_manager import contextual_action
+    action_requested = action_requested or contextual_action(messages)
+    repair = ActionRepair()
+    contract = TaskContract(current_request, session_directory())
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            message["_galam_tool_mode"] = "auto" if action_requested else "none"
+            break
     code_change_completed = False
     content_required = requires_content(current_request)
     direct_command = direct_command_for_request(current_request)
-    no_tool_retries = 0
     invalid_tool_retries = 0
     rejected_commands = {}
     inspected_files = {}
     use_lang_workflow = lang_workflow_available()
+
+    def finish_receipt(receipt):
+        messages.append({"role": "assistant", "content": receipt})
+        sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
+        sys.stdout.write(render_markdown_response(receipt, indent="  ") + "\n\n")
+        sys.stdout.flush()
 
     while step < max_steps:
         step += 1
@@ -662,7 +627,11 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             else:
                 resp_raw = (query_planning_graph(messages) if use_lang_workflow
                             else query_with_fallback(messages))
+        except TaskCancelled:
+            print('\nCurrent task cancelled. Queued prompts will continue.\n')
+            break
         except Exception as e:
+            AGENT_STATE['task_outcome']='failed'
             log_galam_system_event(
                 event_type="QUERY_EXCEPTION",
                 summary=f"Query error in agent loop turn {step}: {e}",
@@ -676,6 +645,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             break
 
         if not resp_raw or AGENT_STATE.get("abort", False):
+            if not resp_raw and not AGENT_STATE.get('abort',False):
+                AGENT_STATE['task_outcome']='failed'
             if AGENT_STATE.get("abort", False):
                 log_galam_system_event(
                     event_type="USER_ABORT",
@@ -688,6 +659,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
         response_msg = resp_raw[0] if isinstance(resp_raw, tuple) else resp_raw
 
         if response_msg == "EXHAUSTED":
+            AGENT_STATE['task_outcome']='failed'
             log_galam_system_event(
                 event_type="ENDPOINTS_EXHAUSTED",
                 summary="All models under active endpoint failed during agent loop execution",
@@ -697,6 +669,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             sys.stdout.flush()
             break
         if isinstance(response_msg, str) and response_msg in ("FAILED", "EXHAUSTED", "CANCELLED"):
+            AGENT_STATE['task_outcome']='cancelled' if response_msg=='CANCELLED' else 'failed'
             if last_tool_result:
                 tool_name, output, succeeded, _ = last_tool_result
                 sys.stdout.write(f"  {'Success' if succeeded else 'Incomplete'}: {tool_name}\n  Summary: {output[:1000]}\n\n")
@@ -722,103 +695,64 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 )):
                     is_post_tool_turn = True
 
-        # If no tool calls detected by parser:
         if not tool_calls:
-            # In a post-tool summary turn, DO NOT extract speculative commands from reasoning traces!
-            # The model is analyzing what it already ran. Only genuine formal tool calls should be run.
-            extra_tools = extract_tools_from_text(assistant_content)
-            if not extra_tools and not is_post_tool_turn:
-                extra_tools = extract_announced_shell_command(assistant_content)
-            if not extra_tools and not is_post_tool_turn:
-                extra_tools = recover_requested_read(current_request, assistant_content, session_directory())
+            # Only actual response content proposes actions; reasoning remains display-only.
+            tool_calls = extract_tools_from_text(assistant_content)
+            if not tool_calls and not is_post_tool_turn:
+                tool_calls = extract_announced_shell_command(assistant_content)
+            if not tool_calls and not is_post_tool_turn:
+                tool_calls = recover_requested_read(current_request, assistant_content, session_directory())
 
-            if extra_tools:
-                tool_calls = extra_tools
-            elif is_post_tool_turn:
-                # The tool step already succeeded with exit status 0!
-                # Render clean summary or synthesize verified completion card directly:
-                clean_text = clean_response_text(assistant_content)
-                if code_change_requested and not code_change_completed:
-                    if no_tool_retries < 4 and step < max_steps:
-                        no_tool_retries += 1
-                        messages.append({"role": "user", "content": (
-                            "The requested code change is not complete. Inspect the actual file if needed, "
-                            "then call replace_file_content or write_file. Do not claim success after inspection alone.")})
-                        continue
-                    sys.stdout.write("  Incomplete: no code change was applied.\n")
-                    sys.stdout.flush()
-                    break
-                if (_is_observation_echo(clean_text) or last_tool_result and last_tool_result[0] == "view_file"
-                        and (announces_read(clean_text) or clean_text.lower().strip(". !") in ("success", "done"))):
-                    clean_text = _tool_completion_summary(last_tool_result)
-                    if messages and messages[-1].get("role") == "assistant":
-                        messages[-1]["content"] = clean_text
-                has_more_work, _ = detect_action_intent(clean_text)
-                if has_more_work and step < max_steps:
-                    messages.append({"role": "user", "content": "The task is still in progress. Execute the next tool call now."})
-                    continue
-                if clean_text and not any(clean_text.lower().startswith(q) for q in ("putting it all together", "first, i need to", "i also need to")):
-                    sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-                    sys.stdout.write("  \033[1;32mSuccess.\033[0m\n\n")
-                    rendered = render_markdown_response(clean_text, indent="  ")
-                    sys.stdout.write(rendered + "\n\n")
-                    sys.stdout.flush()
-                else:
-                    # Action was executed and verified; present zero-fluff completion card
-                    sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai Action Completed\033[0m\n\n")
-                    sys.stdout.write("  \033[1;32m✓\033[0m \033[1;37mAction executed and verified with exit status 0.\033[0m\n\n")
-                    sys.stdout.flush()
-                completed = True
+        if not tool_calls:
+            clean_text = clean_response_text(assistant_content)
+            if action_requested and needs_clarification(assistant_content):
+                sys.stdout.write("\n  Input needed:\n" + render_markdown_response(assistant_content, indent="  ") + "\n\n")
+                sys.stdout.flush()
                 break
-            else:
-                # 2. Check if the model stated an unfulfilled action intention
-                has_intent, intent_phrase = detect_action_intent(assistant_content)
-                if has_intent and step < max_steps:
-                    clean_intent = intent_phrase[:75]
-                    sys.stdout.write(f"\r\033[38;5;244m  › Intention: {clean_intent} (Prompting immediate tool execution...)\033[0m\n")
+            read_receipt = (last_tool_result and last_tool_result[0] == "view_file"
+                            and last_tool_result[2] and not code_change_requested)
+            unfinished = action_requested and (
+                not executed_commands or contract.missing() or code_change_requested and not code_change_completed
+                or last_tool_result and not last_tool_result[2]
+                or detect_action_intent(assistant_content)[0] and not read_receipt)
+            if unfinished:
+                feedback = repair.next_message(current_request, assistant_content,
+                    (workspace_revision, session_directory(), tuple(sorted(inspected_files.items())), tuple(contract.missing())))
+                if feedback is None:
+                    message = "Incomplete: the model did not return a complete tool call after protocol repair. No further action was executed."
+                    messages.append({"role": "assistant", "content": message})
+                    sys.stdout.write("\n  " + message + "\n\n")
                     sys.stdout.flush()
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            f"CRITICAL ACTION REQUIRED: You promised to take action ('{intent_phrase}'), "
-                            "but did not emit a <tool_call> block! Do NOT output conversational promises or delay execution. "
-                            "You must emit the tool call NOW in the standard format:\n"
-                            "<tool_call>\n{\"name\": \"execute_bash\", \"arguments\": {\"command\": \"...\"}}\n</tool_call>"
-                        )
-                    })
-                    continue
-                else:
-                    # Check if user had an unfulfilled actionable request
-                    if (action_requested and not executed_commands or
-                            code_change_requested and not code_change_completed or
-                            last_tool_result and not last_tool_result[2]) and step < max_steps:
-                        if no_tool_retries >= 2:
-                            sys.stdout.write("\n  Incomplete: the model did not provide an executable action.\n")
-                            sys.stdout.write(f"  Summary: {current_request}\n\n")
-                            sys.stdout.flush()
-                            break
-                        no_tool_retries += 1
-                        sys.stdout.write("\r\033[38;5;214m  › Unfinished task detected (Prompting autonomous tool execution...)\033[0m\n")
-                        sys.stdout.flush()
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"Original user request: {current_request}\n"
-                                "ACTION REQUIRED: The request is unfinished. Inspect the last tool result, "
-                                "correct any error, and emit the next <tool_call> now. Do not claim success without verification."
-                            )
-                        })
-                        continue
-
-                    # True Confident Answer! Task complete, verified, or pure conversational answer
-                    clean_text = clean_response_text(assistant_content)
-                    if clean_text:
-                        sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-                        rendered = render_markdown_response(clean_text, indent="  ")
-                        sys.stdout.write(rendered + "\n\n")
-                        sys.stdout.flush()
-                    completed = not (last_tool_result and not last_tool_result[2]) and (not action_requested or bool(executed_commands))
                     break
+                missing = contract.missing()
+                if missing:
+                    feedback["content"] += "\nVerified requirements still missing: " + "; ".join(missing)
+                progress("Preparing a structured action call")
+                messages.append(feedback)
+                continue
+            if is_post_tool_turn and (_is_observation_echo(clean_text) or read_receipt and (
+                    announces_read(clean_text) or clean_text.lower().strip(". !") in ("success", "done"))):
+                clean_text = _tool_completion_summary(last_tool_result)
+                if messages and messages[-1].get("role") == "assistant":
+                    messages[-1]["content"] = clean_text
+            if clean_text:
+                sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
+                if is_post_tool_turn and last_tool_result and last_tool_result[2]:
+                    sys.stdout.write("  \033[1;32mSuccess.\033[0m\n\n")
+                sys.stdout.write(render_markdown_response(clean_text, indent="  ") + "\n\n")
+                sys.stdout.flush()
+            completed = not (last_tool_result and not last_tool_result[2]) and (not action_requested or bool(executed_commands))
+            break
+
+        if tool_calls:
+            # Keep exact proposals in canonical history; native APIs need matching call/result roles.
+            for call in tool_calls:
+                if not call.get("id"):
+                    call["id"] = f"call_{uuid.uuid4().hex[:12]}"
+            if messages and messages[-1].get("role") == "assistant":
+                messages[-1]["_galam_tool_calls"] = tool_calls
+            else:
+                messages.append({"role": "assistant", "content": "", "_galam_tool_calls": tool_calls})
 
         # If we have tool calls and assistant had introductory text, display it as a step line
         if tool_calls and assistant_content:
@@ -861,9 +795,18 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 rejected_in_this_step = True
                 sys.stdout.write(f"  Incomplete: invalid {tool_name} arguments: {validation_error}\n")
                 sys.stdout.flush()
-                messages.append({"role": "user", "content": (
+                messages.append({"role": "user", "_galam_internal": True, "content": (
                     f"The {tool_name} tool arguments are invalid: {validation_error}. "
                     "Inspect the current workspace and provide a valid tool call.")})
+                continue
+
+            mismatch = contract.guard(tool_name, args, session_directory())
+            if mismatch:
+                rejected_in_this_step = True
+                messages.append({"role": "user", "_galam_internal": True, "_galam_tool_mode": "required",
+                                 "content": "[Task contract] " + mismatch})
+                sys.stdout.write("  Incomplete: " + mismatch + "\n")
+                sys.stdout.flush()
                 continue
 
             if tool_name == "execute_bash":
@@ -884,7 +827,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     if rejected_commands[proposed] >= 2:
                         repeated_invalid = True
                         break
-                    messages.append({"role": "user", "content": (
+                    messages.append({"role": "user", "_galam_internal": True, "content": (
                         f"That command cannot run: {invalid_reason}. Stop repeating it. "
                         "Use the live workspace snapshot to find the requested project and a real entry file. "
                         f"User request: {current_request}")})
@@ -895,7 +838,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 exists = os.path.isfile(target_path)
                 if content_required and tool_name == "write_file" and not args.get("content", "").strip():
                     rejected_in_this_step = True
-                    messages.append({"role": "user", "content": (
+                    messages.append({"role": "user", "_galam_internal": True, "content": (
                         "Empty content was rejected: the user requested an implementation, not an empty file. "
                         "Call write_file with the complete actual code/content. Do not use touch or claim completion.")})
                     sys.stdout.write("  Incomplete: empty content cannot satisfy this build request.\n")
@@ -903,7 +846,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     continue
                 if tool_name == "replace_file_content" and not exists:
                     rejected_in_this_step = True
-                    messages.append({"role": "user", "content":
+                    messages.append({"role": "user", "_galam_internal": True, "content":
                         f"Cannot modify missing file {target_path}.\n{workspace_snapshot()}\nInspect the real file path first."})
                     sys.stdout.write(f"  Incomplete: file does not exist: {target_path}\n")
                     sys.stdout.flush()
@@ -916,13 +859,13 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                                                                           "start_line": 1, "end_line": 200})
                         if inspection.startswith("Error:"):
                             rejected_in_this_step = True
-                            messages.append({"role": "user", "content": inspection})
+                            messages.append({"role": "user", "_galam_internal": True, "content": inspection})
                             continue
                         inspected_files[target_path] = current_hash
                         sys.stdout.write(f"  › Inspected existing file before editing: {target_path}\n")
                         render_output_card(inspection, title="Code Inspection", max_lines=40)
-                        messages.append({"role": "user", "content": (
-                            f"[Verified File Inspection: {target_path}]\n{inspection[:14000]}\n"
+                        messages.append({"role": "user", "_galam_internal": True, "content": (
+                            f"[Verified File Inspection: {target_path}]\n{inspection}\n"
                             "Now make the requested change against this actual content. "
                             "Use replace_file_content for a focused edit, then verify the result.")})
                         inspection_performed = True
@@ -931,7 +874,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                             r"\b(?:rewrite|overwrite|replace)\s+(?:the\s+)?(?:entire|whole|full)\s+file\b",
                             current_request, re.IGNORECASE)):
                         rejected_in_this_step = True
-                        messages.append({"role": "user", "content": (
+                        messages.append({"role": "user", "_galam_internal": True, "content": (
                             f"{target_path} already exists. Preserve its other code: use replace_file_content "
                             "with a unique exact block from the inspected file instead of overwriting it.")})
                         sys.stdout.write(f"  Incomplete: refused whole-file overwrite of {target_path}\n")
@@ -944,6 +887,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 continue
 
             mode = normalize_mode(CONFIG.get("mode"))
+            progress(f"Preparing {tool_name}" if not requires_review(mode, tool_name, args) else f"Waiting for approval: {tool_name}")
             cmd_preview = args.get("command", "") if tool_name == "execute_bash" else f"{tool_name}({args.get('path', args.get('query', ''))})"
             if not requires_review(mode, tool_name, args):
                 reason = "Safe Read Execution" if mode == "AUTO" else "Always-Proceed"
@@ -958,7 +902,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 elif choice not in ("y", "yes"):
                     sys.stdout.write("\033[38;5;244m[-] Tool execution declined.\033[0m\n\n")
                     sys.stdout.flush()
-                    messages.append({"role": "user", "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
+                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
                     return
             else:
                 choice = request_tool_review(cmd_preview, f"Approval Required: {tool_name}")
@@ -970,13 +914,14 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 elif choice not in ("y", "yes"):
                     sys.stdout.write("\033[38;5;244m[-] Tool execution declined.\033[0m\n\n")
                     sys.stdout.flush()
-                    messages.append({"role": "user", "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
+                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
                     return
             step_bullet = format_action_step(tool_name, args)
             sys.stdout.write(f"{step_bullet}\n")
             sys.stdout.flush()
 
-            AGENT_STATE["current_thought"] = f"Executing {tool_name}..."
+            target = args.get('path') or args.get('directory') or ''
+            progress(f"Executing {tool_name}" + (f": {target}" if target else ''))
             if AGENT_STATE.get("app_ref"):
                 try:
                     AGENT_STATE["app_ref"].invalidate()
@@ -993,7 +938,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                                   "verification": is_verification})
             out, is_bg = action_result
             executed_commands.add(execution_key)
-            if action_result.success and tool_name in ("write_file", "replace_file_content", "undo_file_change"):
+            if (action_result.success and tool_name in ("write_file", "replace_file_content", "undo_file_change", "make_directory")
+                    and action_result.metadata.get("changed", True)):
                 workspace_revision += 1
                 for command in action_result.checks:
                     if command not in pending_checks:
@@ -1033,11 +979,12 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                         display_output = Path(action_result.output_path).read_text(encoding="utf-8")
                     except OSError:
                         pass
-                render_output_card(display_output, title=card_title, max_lines=None if listing_command or tool_name in ("write_file", "replace_file_content") else 14)
+                render_output_card(display_output, title=card_title, max_lines=None if listing_command or tool_name in ("write_file", "replace_file_content") else 14, success=action_result.success)
 
             clean_out = (out or "").strip()
             if not clean_out:
-                clean_out = "(Command executed successfully with exit status 0 and no output)"
+                clean_out = ("(Tool finished with no output)" if action_result.success else
+                             "(Tool failed with no output)")
 
             has_error = not action_result.success
             if not has_error and tool_name in ("write_file", "replace_file_content"):
@@ -1047,6 +994,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             last_tool_result = (tool_name, clean_out, not has_error, is_bg)
             result_label = "Success" if not has_error else "Incomplete"
             summary_line = action_acknowledgment(tool_name, args, action_result)
+            progress(summary_line)
             sys.stdout.write(f"  \033[1;{'32' if not has_error else '33'}m{result_label}: {tool_name}\033[0m\n")
             sys.stdout.write(f"  Summary: {summary_line[:200]}\n\n")
             sys.stdout.flush()
@@ -1069,10 +1017,20 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             messages.append({
                 "role": "user",
                 "content": observation_feedback,
+                "_galam_tool_mode": "auto",
+                "_galam_call_id": tc["id"],
                 "_galam_action": {"id": action_result.action_id, "status": action_result.status,
-                                  "exit_code": action_result.exit_code, "output_path": action_result.output_path}
+                                  "exit_code": action_result.exit_code, "output_path": action_result.output_path,
+                                  "tool": tool_name, "path": action_result.metadata.get('path'),
+                                  "content_hash": action_result.metadata.get('content_hash')}
             })
             executed_in_this_step += 1
+
+            # Once every declared creation output is proven, ignore speculative extra proposals.
+            receipt = contract.receipt(action_events, pending_checks)
+            if receipt and not AGENT_STATE.get("abort", False):
+                finish_receipt(receipt)
+                return
 
             if AGENT_STATE.get("app_ref"):
                 try:
@@ -1084,18 +1042,18 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             continue
 
         if repeated_invalid:
+            AGENT_STATE['task_outcome']='incomplete'
             sys.stdout.write("  Incomplete: the same invalid command was proposed twice. "
                              "Check the project path and retry the request.\n\n")
             sys.stdout.flush()
             break
 
-        if executed_in_this_step and not rejected_in_this_step and not AGENT_STATE.get("abort", False):
-            receipt = completed_simple_request(current_request, action_events, pending_checks, session_directory())
+        if executed_in_this_step and not AGENT_STATE.get("abort", False):
+            receipt = contract.receipt(action_events, pending_checks)
+            if not receipt and not rejected_in_this_step:
+                receipt = completed_simple_request(current_request, action_events, pending_checks, session_directory())
             if receipt:
-                messages.append({"role": "assistant", "content": receipt})
-                sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-                sys.stdout.write(render_markdown_response(receipt, indent="  ") + "\n\n")
-                sys.stdout.flush()
+                finish_receipt(receipt)
                 completed = True
                 break
 
@@ -1113,6 +1071,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 if invalid_tool_retries < 4 and step < max_steps:
                     continue
                 sys.stdout.write(f"  Incomplete: no valid command was provided for {current_request}.\n\n")
+                AGENT_STATE['task_outcome']='incomplete'
                 sys.stdout.flush()
                 break
             if last_tool_result and not last_tool_result[2]:
@@ -1124,7 +1083,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     continue
                 break
             if is_post_tool_turn and code_change_requested and not code_change_completed:
-                messages.append({"role": "user", "content": (
+                messages.append({"role": "user", "_galam_internal": True, "content": (
                     "The request is unfinished: repeating a successful setup/inspection command does not implement it. "
                     "Call write_file with real content, or inspect and use replace_file_content. Do not claim completion.")})
                 continue
@@ -1152,25 +1111,28 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             break
 
     if step >= max_steps and not completed:
+        AGENT_STATE['task_outcome']='incomplete'
         result = (f"Last result ({last_tool_result[0]}): {last_tool_result[1][:1000]}"
                   if last_tool_result else "No requested action was executed.")
         sys.stdout.write(f"\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n  Incomplete: step limit reached.\n  Summary: {result}\n\n")
         sys.stdout.flush()
 
-TASK_QUEUE = queue.Queue()
+TASK_QUEUE = MessageQueue()
 
 def agent_worker_loop():
     while True:
         item = TASK_QUEUE.get()
         if item is None:
             break
-        user_msg, conv_id, msgs = item
+        user_msg, conv_id, msgs = item.text, item.conversation_id, item.messages
         try:
             AGENT_STATE["abort"] = False
             AGENT_STATE["is_thinking"] = True
+            if item.staged:
+                from engine.transparency import safe_display
+                print(f'\n> {safe_display(user_msg)}\n')
             msgs.append({"role": "user", "content": user_msg})
             run_agent_loop(msgs, conv_id)
-            persist_conversation(conv_id, msgs)
         except Exception as err:
             log_galam_system_event(
                 event_type="WORKER_EXECUTION_ERROR",
@@ -1180,28 +1142,59 @@ def agent_worker_loop():
             sys.stdout.write(f"\n\033[1;31m[!] Execution error: {err}\033[0m\n\n")
             sys.stdout.flush()
         finally:
+            persist_conversation(conv_id, msgs)
+            AGENT_STATE['task_active'] = False
             AGENT_STATE["is_thinking"] = False
             AGENT_STATE["is_streaming"] = False
             AGENT_STATE["current_thought"] = ""
+            AGENT_STATE['active_thought_handler'] = None
+            AGENT_STATE['escape_armed_at'] = None
             if AGENT_STATE.get("app_ref"):
                 try:
                     AGENT_STATE["app_ref"].invalidate()
                 except Exception:
                     pass
-            TASK_QUEUE.task_done()
+            TASK_QUEUE.finish()
 
 def main():
     parser = argparse.ArgumentParser(description="GALAM.AI Autonomous Terminal Agent")
     parser.add_argument("-c", "--conversation", help="Resume specific conversation ID")
+    parser.add_argument('command', nargs='?', choices=('resume',))
+    parser.add_argument('session', nargs='?', help='Conversation ID to resume; omit to browse recent sessions')
     args = parser.parse_args()
+    selected = args.session or args.conversation
+    if args.session and args.command != 'resume':
+        parser.error('Use galamai resume [conversation ID]')
+    if args.command == 'resume' and not selected:
+        from ui.conversation_picker import choose_conversation
+        selected = choose_conversation(CONV_DIR)
+        if selected is None:
+            return
+    conversation_id = selected or uuid.uuid4().hex[:8]
+    try:
+        messages = load_conversation(conversation_id) if selected else []
+    except ValueError as error:
+        parser.error(str(error))
 
-    conversation_id = args.conversation or uuid.uuid4().hex[:8]
-    messages = load_conversation(conversation_id) if args.conversation else []
-
+    if selected:
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
     print_banner(conversation_id)
+    if selected:
+        if not messages:
+            print('No readable history found for this conversation.')
+            return
+        directory = next((m.get('_galam_working_directory') for m in reversed(messages)
+                          if m.get('_galam_working_directory')),None)
+        if isinstance(directory, str) and os.path.isdir(directory):
+            AGENT_STATE['working_directory'] = directory
+        display_resumed_history(messages)
+    from ui import dock_layout
+    dock_layout.CLI_OPENED_AT = time.monotonic()
 
     worker = threading.Thread(target=agent_worker_loop, daemon=True)
     worker.start()
+    AGENT_STATE['enqueue_prompt'] = lambda text: TASK_QUEUE.enqueue(text, conversation_id, messages, staged=True)
 
     try:
         while True:
@@ -1210,11 +1203,17 @@ def main():
             except (KeyboardInterrupt, EOFError):
                 break
 
+            if AGENT_STATE.get('in_btw_mode') and user_input.strip().lower() in ('exit','quit'):
+                close_btw()
+                continue
             if user_input in ("/exit", "/quit"):
+                if AGENT_STATE.get('in_btw_mode'):
+                    close_btw()
+                    continue
                 break
 
             # If review is currently pending, pass this input as review decision
-            if AGENT_STATE.get("review_pending", False):
+            if AGENT_STATE.get("review_pending", False) and not AGENT_STATE.get("in_btw_mode") and user_input.strip().lower() in ('','y','yes','n','no','cancel','c'):
                 decision = user_input.strip() if user_input.strip() else "y"
                 AGENT_STATE["review_decision"] = decision
                 if AGENT_STATE.get("review_event"):
@@ -1225,13 +1224,17 @@ def main():
                 continue
 
             first_token = user_input.split()[0].lower() if user_input.strip() else ""
-            KNOWN_CMDS = {"/add-dir", "/agents", "/artifact", "/btw", "/cancel", "/changelog", "/clear", "/edit", "/exit", "/help", "/model", "/mode", "/plan", "/settings", "/status", "/tasks"}
+            KNOWN_CMDS = {"/add-dir", "/agents", "/artifact", "/btw", "/cancel", "/changelog", "/clear", "/edit", "/exit", "/help", "/local", "/model", "/mode", "/plan", "/settings", "/status", "/tasks", "/queue"}
 
             if first_token in KNOWN_CMDS:
                 handle_slash_command(user_input, messages, conversation_id)
                 continue
             elif first_token.startswith("/") and "/" not in first_token[1:]:
                 print(f"\n\033[1;31mx No command available for '{first_token}'. Type /help for options.\033[0m\n")
+                continue
+
+            if AGENT_STATE.get('in_btw_mode'):
+                handle_btw_command(user_input)
                 continue
 
             if user_input.startswith("!"):
@@ -1261,7 +1264,14 @@ def main():
             # Hardcoded greeting intercept — handle purely locally, never send to LLM
             _pure_greeting = re.fullmatch(r'\s*(hi|hello|hey|yo|sup)\s*', clean_q)
             if _pure_greeting:
-                sys.stdout.write("\n\033[38;5;117m✦ Galam.ai\033[0m\n\nGalam.ai ready. How can I assist you with your projects today?\n\n")
+                from engine.response_stats import KEY,footer
+                answer='Galam.ai ready. How can I assist you with your projects today?'
+                stats={'elapsed':0,'finished_at':time.time(),'status':'completed',
+                       'usage':{'source':'local','input':0,'output':0,'total':0,'requests':0}}
+                messages.extend([{'role':'user','content':user_input},
+                                 {'role':'assistant','content':answer,KEY:stats}])
+                persist_conversation(conversation_id,messages)
+                sys.stdout.write("\n\033[38;5;117m✦ Galam.ai\033[0m\n\n"+render_markdown_response(answer)+'\n\n'+footer(stats)+'\n\n')
                 sys.stdout.flush()
                 continue
 
@@ -1269,12 +1279,19 @@ def main():
                 continue
 
             # Dispatch task to background worker thread:
-            TASK_QUEUE.put((user_input, conversation_id, messages))
+            TASK_QUEUE.enqueue(user_input, conversation_id, messages)
 
     finally:
+        close_btw()
+        AGENT_STATE.pop('enqueue_prompt', None)
+        cancel_current()
+        TASK_QUEUE.clear()
+        TASK_QUEUE.queue.put(None)
+        worker.join(timeout=2)
         save_history()
-        persist_conversation(conversation_id, messages)
-        print(f"\n\033[38;5;244mSession saved. Resume with: glm -c {conversation_id}\033[0m\n")
+        if not worker.is_alive():
+            persist_conversation(conversation_id, messages)
+        print(f"\n\033[38;5;244mSession saved. Resume with: galamai resume {conversation_id}\033[0m\n")
 
 if __name__ == "__main__":
     main()

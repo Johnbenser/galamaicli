@@ -68,3 +68,19 @@ def refresh_local_models(config):
             } for model_id in ids
         }
     return ids
+
+
+def remember_model_context(config, model, context):
+    if isinstance(context, int) and not isinstance(context, bool) and context > 0:
+        _MODEL_INFO[(local_base_url(config), str(model))] = {"context_window": context}
+
+
+def advertised_context(config, model):
+    direct = _MODEL_INFO.get((local_base_url(config), str(model)), {})
+    if direct.get("context_window"):
+        return direct["context_window"]
+    # A bare filename advertised by llama.cpp may correspond to a selected full path.
+    for (base, name), info in list(_MODEL_INFO.items()):
+        if base == local_base_url(config) and "/" not in name and name == os.path.basename(str(model)):
+            return info.get("context_window")
+    return None

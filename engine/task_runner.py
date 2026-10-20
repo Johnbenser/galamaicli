@@ -21,6 +21,7 @@ from config import AGENT_STATE
 from engine.logger import log_galam_system_event, log_tool_execution
 from engine.action_results import ActionResult, as_result
 from engine.result_store import store_result, read_action_output
+from engine.cancellation import run_process as cancellable_run
 from engine.tool_registry import validate_arguments
 
 SERVER_RUNNERS = [
@@ -513,6 +514,14 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
         args = validate_arguments(tool_name, args)
         if tool_name == "execute_bash":
             result = as_result(execute_shell_action(args["command"]))
+        elif tool_name == "make_directory":
+            path = resolve_session_path(args["path"])
+            existed = os.path.isdir(path)
+            os.makedirs(path, exist_ok=True)
+            if not os.path.isdir(path):
+                raise ValueError("Directory was not created")
+            result = ActionResult(f"{'Verified existing' if existed else 'Created'} directory '{path}'.",
+                                  verified=True, metadata={"path": path, "kind": "directory", "changed": not existed})
         elif tool_name == "read_action_output":
             result = ActionResult(read_action_output(**args))
         elif tool_name == "undo_file_change":
@@ -913,7 +922,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
         # Redirect background server stdout and stderr to persistent task log to avoid Linux 64KB pipe buffer deadlock and SIGPIPE
         server_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs", "tasks")
         os.makedirs(server_log_dir, exist_ok=True)
-        server_log_file = os.path.join(server_log_dir, f"server_{port}.log")
+        server_log_file = os.path.abspath(os.path.join(server_log_dir, f"server_{port}.log"))
         log_out = open(server_log_file, "a", encoding="utf-8", errors="replace")
 
         try:
@@ -994,18 +1003,19 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
                 # Do NOT confirm server is running if HTTP 200 OK was not received!
                 return (
                     f"[Error: Server PID {proc.pid} launched on port {port}, but did not return HTTP 200 OK within health check timeout. "
-                    f"Check startup errors in logs/tasks/server_{port}.log]",
+                    f"Check startup errors in {server_log_file}]",
                     False
                 )
 
             # ONLY confirm and print card when HTTP 200 OK is verified!
             task = GLOBAL_TASK_MANAGER.register_task(bg_cmd, proc, disp_cmd, port)
+            task['log_path'] = server_log_file
             if navigation_target:
                 AGENT_STATE["working_directory"] = navigation_target
             print_server_card(disp_cmd, port, proc.pid)
             return (
                 f"[Background server started with PID {proc.pid} on port {port} "
-                f"(HTTP {http_status} OK verified at http://127.0.0.1:{port})]",
+                f"(HTTP {http_status} OK verified at http://127.0.0.1:{port}); log: {server_log_file}]",
                 True
             )
         except Exception as e:
@@ -1014,7 +1024,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
         is_curl_cmd = clean_cmd.strip().startswith("curl ")
 
         try:
-            res = subprocess.run(
+            res = cancellable_run(
                 clean_cmd,
                 shell=True,
                 cwd=run_cwd,
@@ -1048,7 +1058,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
             if not out.strip() and "find " in clean_cmd and "/sdcard" in clean_cmd and " -L " not in clean_cmd:
                 try:
                     fixed_cmd = clean_cmd.replace("find ", "find -L ", 1)
-                    res_retry = subprocess.run(
+                    res_retry = cancellable_run(
                         fixed_cmd,
                         shell=True,
                         cwd=run_cwd,
@@ -1063,7 +1073,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
                         out = res_retry.stdout
                         result_returncode = res_retry.returncode
                     elif "-type d" in clean_cmd:
-                        res_ls = subprocess.run(
+                        res_ls = cancellable_run(
                             "ls -d /sdcard/*/ 2>/dev/null",
                             shell=True,
                             env=sub_env,
@@ -1092,7 +1102,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
                                     if real_entry != p_base:
                                         real_full = os.path.join(p_dir, real_entry)
                                         fixed_cmd = clean_cmd.replace(target_path, f'"{real_full}"')
-                                        res_retry = subprocess.run(
+                                        res_retry = cancellable_run(
                                             fixed_cmd,
                                             shell=True,
                                             cwd=run_cwd,

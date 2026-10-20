@@ -1,0 +1,31 @@
+  Download summary
+  ────────────────
+
+  ┌──────┬───────┐
+  │ Type │ Count │
+  ├──────┼───────┤
+  │ .mp3 │    11 │
+  │ .pdf │    89 │
+  └──────┴───────┘
+
+  Files (example):
+  ────────────────
+  • app.py
+  • zebra.py
+
+  Next steps
+  ──────────
+  1. Inspect the selected file.
+  2. Run the project checks.
+
+  ╭─ python ──────────────────────────────╮
+  │ 1 print("Long code wraps without clip │
+  │   ping source content")               │
+  ╰───────────────────────────────────────╯
+
+  Note: Counts come from the supplied
+  response; formatting runs locally.
+
+  Worked for 0m 27s • 03:02:40
+  Tokens: 1,200 input + 340 output = 1,540
+  total (provider reported)

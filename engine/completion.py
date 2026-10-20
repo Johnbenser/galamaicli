@@ -40,6 +40,33 @@ def _command_words(command):
         return []
 
 
+def explicit_report_command(request):
+    """Only an explicit command followed by a factual reporting request."""
+    request = _request_body(request)
+    prefix = re.match(r'^(?:run|execute)\s+(?:(?:this|the|exact|terminal|shell|bash|command|using|execute_bash|galam|action)\b[\s:,-]*)*', request, re.I)
+    if not prefix:
+        return None
+    tail = request[prefix.end():].strip()
+    if tail[:1] in ('`','"',"'"):
+        end = tail.find(tail[0],1)
+        if end<0:
+            return None
+        command, suffix = tail[1:end], tail[end+1:]
+    else:
+        parts = re.split(r'\s*\.\s+(?=(?:report|show|return|tell|do not)\b)|\s+(?:and|then)\s+(?=(?:report|show|return|tell)\b)',tail,maxsplit=1,flags=re.I)
+        command, suffix = parts[0].rstrip(' .'), parts[1] if len(parts)>1 else ''
+    suffix = re.sub(r'\bdo not change any files\b','',suffix,flags=re.I)
+    words = re.findall(r'[\w]+',suffix.lower())
+    allowed = {'and','then','please','report','show','return','tell','me','the','its','actual','command','terminal',
+               'result','results','output','byte','count','exit','status','code','success','failure','whether','it','succeeded','failed'}
+    if not command or any(word not in allowed for word in words) or re.search(r'[;&|`$<>]',suffix):
+        return None
+    from engine.tool_parser import _looks_like_shell_command
+    if not _looks_like_shell_command(command) or not _atomic(command,allow_test=True):
+        return None
+    return command
+
+
 def _request_body(request):
     text = request.strip()
     text = re.sub(r"^(?:(?:please|kindly)\s+|(?:can|could|would)\s+you\s+)+", "", text, flags=re.I)
@@ -143,6 +170,15 @@ def completed_simple_request(request, events, pending_checks, directory):
     if len(commands) != 1 or any(event["tool"] not in ("execute_bash", "view_file", "search_files") for event in events):
         return None
     event = commands[0]
+    from engine.token_policy import enabled
+    from config import CONFIG
+    expected = explicit_report_command(request) if enabled(CONFIG, 'receipts') else None
+    if (expected and _command_words(expected) == _command_words(event['args'].get('command',''))
+            and not event['result'].is_background):
+        from engine.result_store import compact_text
+        output = compact_text(event['result'].output.strip(),1200)
+        summary = action_acknowledgment('execute_bash',event['args'],event['result'])
+        return summary + ('\n'+output if output else '')
     if not _atomic(request, allow_test=True):
         return None
     match = re.fullmatch(r"(?:run|execute)\s+(.+?)\s*[.!]?", request, re.I | re.S)

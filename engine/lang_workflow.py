@@ -44,7 +44,11 @@ def _typed_tools():
         """List or stop background tasks after policy review."""
         return action
 
-    functions = (execute_bash, view_file, write_file,
+    def make_directory(path: str) -> str:
+        """Create a directory after policy review."""
+        return path
+
+    functions = (make_directory, execute_bash, view_file, write_file,
                  replace_file_content, search_files, manage_tasks)
     return {function.__name__: StructuredTool.from_function(function)
             for function in functions}

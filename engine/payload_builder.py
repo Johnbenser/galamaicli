@@ -35,6 +35,13 @@ def get_endpoint_api_key(endpoint_name: str, provider: str = None) -> str:
         "llm7": ["LLM7_API_KEY", "LLM7_KEY"]
     }
 
+    # Registry-defined endpoints can name their credential without custom routing.
+    configured_env = ENDPOINT_REGISTRY.get(endpoint_name, {}).get('api_key_env')
+    if configured_env and ep_low not in ENV_MAP:
+        value = os.environ.get(configured_env, '').strip()
+        if value:
+            return value
+
     # Check direct provider first if specified
     if prov_low and prov_low in PROVIDER_MAP:
         for var in PROVIDER_MAP[prov_low]:
@@ -146,6 +153,8 @@ def build_request_data(endpoint_name: str, model_name: str, messages: list, stre
     url, headers, payload = _build_request_data(endpoint_name, model_name, messages, stream)
     from config import CONFIG
     from engine.context_manager import cap_request_output
+    from engine.agent_router import request_headers
+    headers = request_headers(endpoint_name, url, headers, stream, CONFIG)
     return url, headers, cap_request_output(payload, endpoint_name, model_name, CONFIG)
 
 
@@ -172,7 +181,7 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
         headers["Authorization"] = f"Bearer {token}"
 
         route_type = m_info.get("route_type", "v1" if not model_name.startswith("@cf/") else "run")
-        if route_type == "run" or model_name.startswith("@cf/"):
+        if route_type == "run":
             url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model_name}"
             payload = {"messages": messages, "stream": stream}
         else:
@@ -349,11 +358,19 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
             "model": model_name,
             "messages": messages,
             "stream": stream,
-            "temperature": 0.5,
+            "temperature": 0.2,
             "max_tokens": local_max
         }
+        from engine.local_tuning import effective_tuning
+        tuning = effective_tuning(CONFIG, model_name)
+        if tuning:
+            payload["temperature"] = tuning["temperature"]
+            payload["max_tokens"] = tuning["max_tokens"]
         return url, headers, payload
 
-    url = f"{ep.get('base_url', '')}/chat/completions"
+    api_key = get_endpoint_api_key(endpoint_name)
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+    url = f"{ep.get('base_url', '').rstrip('/')}/chat/completions"
     payload = {"model": model_name, "messages": messages, "stream": stream}
     return url, headers, payload
