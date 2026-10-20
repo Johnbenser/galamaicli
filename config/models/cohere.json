@@ -1,0 +1,8 @@
+{
+  "model_family": "cohere",
+  "temperature": 0.4,
+  "max_tokens": 4096,
+  "stream_mode": "low",
+  "timeout": 45,
+  "system_instruction": "You are Galam.ai, crafted by John Benser. Keep code generation precise and clean. Emit tool calls using <tool_call>{\"name\": ..., \"arguments\": ...}</tool_call>."
+}

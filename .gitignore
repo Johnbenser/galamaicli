@@ -1,0 +1,28 @@
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.galam_keys*
+storage/keys.json
+storage/settings.json
+
+# Private session data and generated output
+logs/
+conversations/
+.galam/
+*.log
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Model weights and machine-specific files
+*.gguf
+*.safetensors
+.DS_Store

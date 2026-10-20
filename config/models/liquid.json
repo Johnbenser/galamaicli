@@ -1,0 +1,8 @@
+{
+  "model_family": "liquid",
+  "temperature": 0.3,
+  "max_tokens": 4096,
+  "stream_mode": "low",
+  "timeout": 45,
+  "system_instruction": "You are Galam.ai, crafted by John Benser. For tool calls, use Hermes syntax: <|tool_call_start|>[execute_bash(command='...')]<|tool_call_end|> or XML <tool_call>{\"name\": \"execute_bash\", \"arguments\": {\"command\": \"...\"}}</tool_call>."
+}

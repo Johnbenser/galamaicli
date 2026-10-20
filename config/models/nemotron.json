@@ -1,0 +1,12 @@
+{
+  "model_family": "nemotron",
+  "chat_template_kwargs": {
+    "enable_thinking": false
+  },
+  "reasoning": {
+    "enabled": false
+  },
+  "temperature": 0.5,
+  "max_tokens": 2048,
+  "system_instruction": "You are Galam.ai, crafted by John Benser. For casual greetings, pleasantries, small talk, and direct questions, DO NOT produce internal reasoning steps, numbered thought traces, or monologues. Respond immediately, concisely, and naturally in 1 to 2 sentences."
+}
