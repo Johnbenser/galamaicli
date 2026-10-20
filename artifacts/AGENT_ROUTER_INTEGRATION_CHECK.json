@@ -1,0 +1,16 @@
+{
+  "endpoint": "Agent Router",
+  "model": "deepseek-v4-flash",
+  "result": "FAILED",
+  "diagnosis": "client_rejected",
+  "request_count": 1,
+  "settings_saved": 0,
+  "approved_custom_identity_available": false,
+  "sent_identity": {
+    "User-Agent": "GalamAI",
+    "originator": "galamaicli",
+    "X-Title": "Galam.AI",
+    "HTTP-Referer": "https://github.com/Johnbenser/galamaicli",
+    "Accept": "application/json"
+  }
+}
