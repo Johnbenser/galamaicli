@@ -15,6 +15,12 @@ def get_endpoint_api_key(endpoint_name: str, provider: str = None) -> str:
        - Token prefix heuristics (nvapi-* -> NVIDIA, sk-or-* -> OpenRouter, gsk_* -> Groq, AIza* -> Gemini)
        - Generic token fallback when a single key is exported in $API_KEYS or $API_KEY
     """
+    # Standalone diagnostics can call this before the application imports config.
+    # Initialize its literal secret loader before inspecting environment aliases.
+    try:
+        import config as credential_config
+    except ImportError:
+        pass
     ep_low = (endpoint_name or "").lower().strip()
     prov_low = (provider or "").lower().strip()
 

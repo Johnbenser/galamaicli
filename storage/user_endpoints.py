@@ -15,6 +15,25 @@ from engine.result_store import atomic_bytes
 FORMATS={'chat_completions':'chat/completions','responses':'responses'}
 
 
+def endpoint_choices():
+    from storage.endpoints import ENDPOINT_REGISTRY
+    return sorted(ENDPOINT_REGISTRY,key=str.casefold)
+
+
+def default_api_format(endpoint,model=''):
+    """Local catalog preference; this never makes an inference request."""
+    from collections import Counter
+    from storage.endpoints import ENDPOINT_REGISTRY
+    entry=ENDPOINT_REGISTRY.get(endpoint,{})
+    models=entry.get('models',{})
+    selected=models.get(model,{}).get('custom_connection',{}).get('api_format')
+    if selected in FORMATS:return selected
+    counts=Counter(info.get('custom_connection',{}).get('api_format',info.get('api_format','chat_completions'))
+                   for info in models.values())
+    counts={kind:count for kind,count in counts.items() if kind in FORMATS}
+    return max(FORMATS,key=lambda kind:counts.get(kind,0))
+
+
 def user_home():
     if os.environ.get('GALAM_HOME'):
         return Path(os.environ['GALAM_HOME']).expanduser().resolve()
@@ -42,8 +61,15 @@ def normalize_url(value,api_format):
         raise ValueError('Keep credentials, queries and fragments out of the URL.')
     path=parsed.path.rstrip('/')
     # Accept a service root, /v1 base, or a complete route, without doubling /v1.
-    for suffix in ('/chat/completions','/responses','/response'):
-        if path.endswith(suffix):path=path[:-len(suffix)];break
+    while True:
+        suffix=next((s for s in ('/chat/completions','/responses','/response') if path.endswith(s)),None)
+        if not suffix:break
+        path=path[:-len(suffix)]
+    # Ollama's native /api routes are a different wire format. Its compatible
+    # interface is /v1, including previously saved double-appended routes.
+    for suffix in ('/api/chat','/api/generate'):
+        if path.endswith(suffix):path=path[:-len(suffix)]+'/v1';break
+    if path.endswith('/api') and (parsed.hostname=='ollama.com' or port==11434):path=path[:-4]+'/v1'
     if not path:path='/v1'
     if path.endswith(('/embeddings','/models','/messages')):
         raise ValueError('Use a chat API base URL, not models, embeddings or messages.')
@@ -63,15 +89,24 @@ def validate_profile(data):
         raise ValueError('Endpoint name must contain 1–72 printable characters.')
     if not model or len(model)>240 or any(c.isspace() or not c.isprintable() for c in model):
         raise ValueError('Model ID must contain 1–240 characters without spaces.')
-    api_format=data.get('api_format','chat_completions')
+    api_format=data.get('api_format','default')
+    mode=data.get('api_format_mode',api_format)
+    if api_format=='default':api_format=default_api_format(endpoint,model)
+    if mode not in ('default',*FORMATS):raise ValueError('Choose Default, Chat Completions or Responses.')
     url=normalize_url(data.get('url',''),api_format)
-    env=str(data.get('api_key_env','')).strip().removeprefix('$') or default_key_env(endpoint,url)
+    env=str(data.get('api_key_env','')).strip().removeprefix('$')
+    if not env:
+        from storage.endpoints import ENDPOINT_REGISTRY
+        group=ENDPOINT_REGISTRY.get(endpoint,{})
+        if urlsplit(group.get('base_url','')).hostname==urlsplit(url).hostname:
+            env=group.get('api_key_env','')
+        env=env or default_key_env(endpoint,url)
     if not re.fullmatch(r'[A-Z][A-Z0-9_]{1,100}_API_(?:KEY|TOKEN)',env):
         raise ValueError('Key variable must be uppercase and end in _API_KEY or _API_TOKEN.')
     try:context=int(data.get('context_window',8192))
     except (TypeError,ValueError):raise ValueError('Context window must be an integer.') from None
     if not 2048<=context<=4000000:raise ValueError('Context window must be between 2,048 and 4,000,000 tokens.')
-    return {'endpoint':endpoint,'model':model,'url':url,'api_format':api_format,
+    return {'endpoint':endpoint,'model':model,'url':url,'api_format':api_format,'api_format_mode':mode,
             'api_key_env':env,'context_window':context}
 
 

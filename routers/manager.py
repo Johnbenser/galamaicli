@@ -26,7 +26,9 @@ from engine import cancellation
 def terminal_quota_error(error):
     text = str(error).lower()
     return any(term in text for term in ('resourceexhausted', 'insufficient_quota',
-        'total request limit reached', 'daily limit reached', 'quota exhausted'))
+        'total request limit reached', 'daily limit reached', 'quota exhausted',
+        'free-models-per-day','daily quota','daily rate limit','per-day limit',
+        'monthly quota','account quota exceeded'))
 
 STATS = defaultdict(int)
 
@@ -881,7 +883,7 @@ def query_with_fallback(*args, **kwargs):
                     sys.stdout.flush()
                     resp.close()
                     return 'FAILED', active_m
-                if terminal_quota_error(err_detail):
+                if terminal_quota_error(err_json or err_detail):
                     sys.stdout.write(f'\n[!] Request quota exhausted (HTTP {sc}): {err_detail}. Task stopped.\n')
                     sys.stdout.flush()
                     resp.close()
@@ -897,6 +899,8 @@ def query_with_fallback(*args, **kwargs):
                     status_desc = "forbidden (access denied)"
                 elif sc == 404:
                     status_desc = "not found (invalid endpoint or model)"
+                elif sc == 410:
+                    status_desc = "model unavailable or retired (HTTP 410 Gone)"
                 elif sc == 429:
                     status_desc = "rate limited (upstream quota limit)"
                 elif sc >= 500:

@@ -41,6 +41,33 @@ class Workspace(unittest.TestCase):
 
 
 class ConnectionStorageTests(Workspace):
+    def test_default_format_uses_model_or_most_common_endpoint_format_and_remains_editable(self):
+        ENDPOINT_REGISTRY['Mixed']={'models':{
+            'one':{'custom_connection':{'api_format':'responses'}},
+            'two':{'custom_connection':{'api_format':'responses'}},
+            'three':{'custom_connection':{'api_format':'chat_completions'}}}}
+        profile=store.validate_profile({**self.profile,'endpoint':'Mixed','api_format':'default'})
+        self.assertEqual((profile['api_format_mode'],profile['api_format']),('default','responses'))
+        self.assertEqual(profile['url'],'https://fixture.invalid/v1/responses')
+        self.assertEqual(store.default_api_format('Mixed','three'),'chat_completions')
+        self.assertEqual(store.validate_profile({**self.profile,'endpoint':'Mixed','api_format':'chat_completions'})['api_format'],'chat_completions')
+        self.assertEqual(store.validate_profile(profile),profile)
+
+    def test_ollama_native_urls_and_repeated_route_suffixes_normalize_to_compatible_endpoint(self):
+        for value in ('https://ollama.com/api','https://ollama.com/api/chat',
+                      'https://ollama.com/api/chat/chat/completions',
+                      'https://ollama.com/v1/chat/completions/chat/completions'):
+            self.assertEqual(store.normalize_url(value,'chat_completions'),'https://ollama.com/v1/chat/completions')
+        self.assertEqual(store.normalize_url('http://localhost:11434/api','responses'),'http://localhost:11434/v1/responses')
+        self.assertEqual(store.normalize_url('https://other.invalid/api','chat_completions'),'https://other.invalid/api/chat/completions')
+
+    def test_matching_provider_host_reuses_group_key_but_other_hosts_get_separate_reference(self):
+        ENDPOINT_REGISTRY['Builtin']['api_key_env']='PROVIDER_API_KEY'
+        profile=store.validate_profile({**self.profile,'endpoint':'Builtin','url':'https://builtin.invalid/v1','api_key_env':''})
+        self.assertEqual(profile['api_key_env'],'PROVIDER_API_KEY')
+        other=store.validate_profile({**self.profile,'endpoint':'Builtin','api_key_env':''})
+        self.assertNotEqual(other['api_key_env'],'PROVIDER_API_KEY')
+
     def test_append_keeps_existing_rc_secrets_and_quotes_key_literally(self):
         existing='# user secrets\nexport OTHER_API_KEY=keep-me\n# final comment without newline'
         (self.home/'.secrets').write_text(existing)
@@ -162,6 +189,16 @@ class ConnectionStorageTests(Workspace):
 
 
 class ResponsesProtocolTests(Workspace):
+    def test_daily_account_limit_stops_without_retrying_every_model(self):
+        ENDPOINT_REGISTRY['Builtin']['models']['second']={'name':'second'}
+        response=SimpleNamespace(ok=False,status_code=429,headers={},text='limit reached',
+            json=lambda:{'error':{'message':'Rate limit exceeded: free-models-per-day'}},close=lambda:None)
+        with patch.dict(CONFIG,{'active_endpoint':'Builtin','active_model':'original','stream':False}), \
+             patch.object(manager.SESSION,'post',return_value=response) as post,contextlib.redirect_stdout(io.StringIO()):
+            answer,_=manager.query_with_fallback([{'role':'user','content':'Reply OK.'}])
+        self.assertEqual(answer,'FAILED');post.assert_called_once()
+        self.assertFalse(manager.terminal_quota_error('temporary per-model rate limit'))
+
     def test_message_tool_and_reasoning_round_trip_preserves_call_identity(self):
         encrypted={'type':'reasoning','id':'rs_1','summary':[],'encrypted_content':'fixture-encrypted'}
         payload={'model':'fixture','max_tokens':512,'stream':True,'messages':[
@@ -335,6 +372,47 @@ class ResponsesProtocolTests(Workspace):
 
 
 class ConnectionEditorTests(Workspace):
+    def test_numbered_endpoint_picker_selects_without_an_endpoint_text_field(self):
+        from ui.endpoint_manager import EndpointManager
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        ENDPOINT_REGISTRY['Other']={'base_url':'https://other.invalid/v1','models':{}}
+        async def exercise():
+            with create_pipe_input() as pipe,create_app_session(input=pipe,output=DummyOutput()):
+                editor=EndpointManager();self.assertNotIn('endpoint',editor.fields)
+                task=asyncio.create_task(editor.app.run_async())
+                try:
+                    await asyncio.sleep(.06);pipe.send_text('\r');await asyncio.sleep(.06)
+                    self.assertEqual(editor.page,'picker')
+                    self.assertEqual(editor.picker.values,[('Builtin','1. Builtin'),('Other','2. Other')])
+                    pipe.send_text('2\r');await asyncio.sleep(.06)
+                    self.assertEqual(editor.page,'form');self.assertEqual(editor.selected_endpoint,'Other')
+                    self.assertEqual(editor.fields['url'].text,'https://other.invalid/v1')
+                    self.assertEqual(editor.protocol.current_value,'default')
+                finally:
+                    if not task.done():editor.app.exit()
+                    await task
+        asyncio.run(exercise())
+
+    def test_multi_digit_choice_and_provider_switch_clear_old_credentials_from_form(self):
+        from ui.endpoint_manager import EndpointManager
+        from prompt_toolkit.application import create_app_session
+        from prompt_toolkit.input.defaults import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        for index in range(12):ENDPOINT_REGISTRY[f'Provider {index:02d}']={'models':{},'base_url':f'https://host{index}.invalid/v1'}
+        with create_pipe_input() as pipe,create_app_session(input=pipe,output=DummyOutput()):
+            editor=EndpointManager();editor.fields['key'].text='discard-old-provider-key';editor.fields['api_key_env'].text='OLD_API_KEY'
+            editor.pick_endpoint()
+            editor.choice_number.text='999999999999999999999999'
+            editor.select_number(editor.choice_number.buffer);self.assertEqual(editor.page,'picker')
+            editor.choice_number.text='12';expected=editor.picker.values[11][0]
+            editor.select_number(editor.choice_number.buffer)
+            self.assertEqual(editor.selected_endpoint,expected)
+            self.assertEqual(editor.fields['key'].text,'');self.assertEqual(editor.fields['api_key_env'].text,'')
+            editor.fields['url'].text='https://other.invalid/api/v2'
+            self.assertIn('/api/v2/chat/completions',editor.default_path())
+
     def test_save_confirmation_stays_in_ui_and_password_is_never_rendered(self):
         from ui.endpoint_manager import EndpointManager
         from prompt_toolkit.application import create_app_session

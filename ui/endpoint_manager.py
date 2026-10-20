@@ -15,7 +15,7 @@ from prompt_toolkit.layout.dimension import Dimension
 
 from config import CONFIG,AGENT_STATE,save_settings
 from storage.endpoints import ENDPOINT_REGISTRY
-from storage.user_endpoints import read_profiles,save_profile,user_home,validate_profile
+from storage.user_endpoints import read_profiles,save_profile,user_home,endpoint_choices,default_api_format,normalize_url,FORMATS
 
 
 def busy():
@@ -26,11 +26,14 @@ def busy():
 class EndpointManager:
     def __init__(self):
         self.original=None;self.status='';self.page='form';self.picker=None
+        choices=endpoint_choices()
+        self.selected_endpoint=CONFIG.get('active_endpoint') if CONFIG.get('active_endpoint') in choices else choices[0]
         self.fields={name:TextArea(text=default,multiline=False,password=name=='key',
                                   style='class:input',height=1,history=DummyHistory())
-                     for name,default in [('endpoint','My API'),('model',''),('url',''),
+                     for name,default in [('model',''),('url',''),
                        ('api_key_env',''),('key',''),('context_window','8192')]}
-        self.protocol=RadioList([('chat_completions','Chat Completions'),('responses','Responses')])
+        self.protocol=RadioList(self.protocol_values())
+        self.fields['model'].buffer.on_text_changed+=lambda buffer:self.update_default()
         self.fields['url'].buffer.on_text_changed+=self.url_changed
         self.activate=Checkbox('Use this model now',checked=True)
         self.key_bindings=KeyBindings()
@@ -56,16 +59,34 @@ class EndpointManager:
         if busy():
             self.status='Finish or cancel the current task before changing model connections.'
             self.page='blocked'
-        else:self.app.layout.focus(self.fields['endpoint'])
+        else:self.app.layout.focus(self.endpoint_button)
+
+    def protocol_values(self):
+        kind=default_api_format(self.selected_endpoint,self.fields['model'].text)
+        label={'chat_completions':'Chat Completions','responses':'Responses'}[kind]
+        return [('default','Default: '+label),('chat_completions','Override: Chat Completions'),('responses','Override: Responses')]
+
+    def update_default(self):
+        self.protocol.values=self.protocol_values()
+
+    def default_path(self):
+        from urllib.parse import urlsplit
+        kind=default_api_format(self.selected_endpoint,self.fields['model'].text)
+        base=self.fields['url'].text or ENDPOINT_REGISTRY.get(self.selected_endpoint,{}).get('base_url','')
+        try:path=urlsplit(normalize_url(base,kind)).path
+        except ValueError:path='/v1/'+FORMATS[kind]
+        return 'Default route: '+path
 
     def make_form(self):
-        rows=[VSplit([Button('Saved models',handler=self.pick_saved),Button('Choose endpoint',handler=self.pick_endpoint)],padding=1)]
-        labels={'endpoint':'Endpoint group (choose existing or type new)', 'model':'Model ID',
+        self.endpoint_button=Button('Choose endpoint',handler=self.pick_endpoint)
+        rows=[VSplit([Button('Saved models',handler=self.pick_saved),self.endpoint_button],padding=1),
+              Label(lambda:'Endpoint: '+self.selected_endpoint),Window(height=1)]
+        labels={'model':'Model ID',
                 'url':'Base URL or full API URL', 'api_key_env':'Key variable (NAME or $NAME; blank = auto)',
                 'key':'API key (masked; blank keeps existing key)', 'context_window':'Context window in tokens'}
-        for name in ('endpoint','model','url'):
+        for name in ('model','url'):
             rows.extend([Label(labels[name]),self.fields[name],Window(height=1)])
-        rows.extend([Label('API format: /v1/chat/completions or /v1/responses'),self.protocol])
+        rows.extend([Label('API format (keep Default unless needed)'),self.protocol,Label(self.default_path)])
         for name in ('api_key_env','key','context_window'):
             rows.extend([Label(labels[name]),self.fields[name],Window(height=1)])
         rows.extend([self.activate,Label('Keys: '+str(user_home()/'.secrets')),
@@ -76,13 +97,15 @@ class EndpointManager:
         from urllib.parse import urlsplit
         try:path=urlsplit(buffer.text.strip()).path.rstrip('/')
         except ValueError:return
-        if path.endswith(('/response','/responses')):self.protocol.current_value='responses'
-        elif path.endswith('/chat/completions'):self.protocol.current_value='chat_completions'
+        kind='responses' if path.endswith(('/response','/responses')) else 'chat_completions' if path.endswith('/chat/completions') else None
+        if kind:self.protocol.current_value='default' if kind==default_api_format(self.selected_endpoint,self.fields['model'].text) else kind
 
     def container(self):
         if self.page=='blocked':return HSplit([Label('Connection editor unavailable during active work.'),Button('Back',handler=self.finish)])
         if self.page=='result':return self.result
-        if self.page=='picker':return HSplit([self.picker,Button('Use selection',handler=self.use_selection),Button('Back',handler=self.back_to_form)])
+        if self.page=='picker':
+            prompt=[Label('Endpoint number + Enter, or Tab to list'),self.choice_number] if self.picker_kind=='endpoint' else []
+            return HSplit(prompt+[self.picker,Button('Use selection',handler=self.use_selection),Button('Back',handler=self.back_to_form)])
         # DynamicContainer is evaluated during Application initialization.
         return getattr(self,'form',Window())
 
@@ -98,7 +121,7 @@ class EndpointManager:
         else:self.finish()
 
     def back_to_form(self):
-        self.page='form';self.status='';self.app.layout.focus(self.fields['endpoint']);self.app.invalidate()
+        self.page='form';self.status='';self.app.layout.focus(self.endpoint_button);self.app.invalidate()
 
     def pick_saved(self):
         try:self.profiles=read_profiles()
@@ -108,33 +131,56 @@ class EndpointManager:
         self.pick('saved',values)
 
     def pick_endpoint(self):
-        self.pick('endpoint',[(name,name) for name in ENDPOINT_REGISTRY])
+        self.pick('endpoint',[(name,f'{number}. {name}') for number,name in enumerate(endpoint_choices(),1)])
 
     def pick(self,kind,values):
         self.picker_kind=kind;self.picker=RadioList(values);self.page='picker';self.status=''
-        self.app.layout.focus(self.picker);self.app.invalidate()
+        if kind=='endpoint':
+            self.choice_number=TextArea(multiline=False,history=DummyHistory(),height=1,style='class:input',accept_handler=self.select_number)
+        self.app.layout.focus(self.choice_number if kind=='endpoint' else self.picker);self.app.invalidate()
+
+    def select_number(self,buffer):
+        text=buffer.text.strip()
+        if not text.isdecimal() or len(text)>len(str(len(self.picker.values))) or not 1<=int(text)<=len(self.picker.values):
+            self.status=f'Choose a number from 1 to {len(self.picker.values)}.';return True
+        self.picker.current_value=self.picker.values[int(text)-1][0]
+        self.use_selection()
+        return True
 
     def use_selection(self):
         value=self.picker.current_value
-        if self.picker_kind=='endpoint':self.fields['endpoint'].text=value
+        if self.picker_kind=='endpoint':
+            changed=value!=self.selected_endpoint
+            self.selected_endpoint=value
+            if changed or not self.fields['url'].text:
+                base=ENDPOINT_REGISTRY[value].get('base_url','')
+                self.fields['url'].text=base if base.startswith(('https://','http://')) and '{' not in base else ''
+            if changed:
+                self.fields['api_key_env'].text=''
+                self.clear_key()
+                self.protocol.current_value='default'
+            self.update_default()
         elif value==-1:self.reset();return
         else:
             profile=copy.deepcopy(self.profiles[value]);self.original=profile
+            self.selected_endpoint=profile['endpoint']
             for name,field in self.fields.items():
                 field.text='' if name=='key' else str(profile.get(name,''))
-            self.protocol.current_value=profile['api_format']
+            self.update_default()
+            self.protocol.current_value=profile.get('api_format_mode',profile['api_format'])
         self.back_to_form()
 
     def reset(self):
         self.original=None
-        for name,field in self.fields.items():field.text={'endpoint':'My API','context_window':'8192'}.get(name,'')
-        self.clear_key();self.protocol.current_value='chat_completions';self.back_to_form()
+        for name,field in self.fields.items():field.text={'context_window':'8192'}.get(name,'')
+        self.clear_key();self.update_default();self.protocol.current_value='default';self.back_to_form()
 
     def save(self):
         if self.page!='form':return
         if busy():
             self.status='Finish or cancel the current task before saving.';return
         data={name:field.text for name,field in self.fields.items() if name!='key'}
+        data['endpoint']=self.selected_endpoint
         data['api_format']=self.protocol.current_value
         try:
             profile=save_profile(data,self.fields['key'].text,original=self.original)

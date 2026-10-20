@@ -26,6 +26,14 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Improved
 
+- Endpoint assignment uses a sorted numbered list with number+Enter selection, including multi-digit choices. Provider changes prefill their base URL and clear old credential form fields.
+- API format defaults to the selected model's known format or the most common endpoint format, with the resolved route shown and explicit overrides still available.
+- Matching provider hosts can reuse the endpoint credential variable without typing it; unrelated hosts receive separate references.
+- Existing Ollama native/doubled routes normalize to the compatible `/v1` interface instead of becoming `/api/chat/chat/completions`.
+- Credential lookup initializes the secret loader before checking environment aliases, including standalone diagnostics.
+- Explicit daily/account quota errors stop redundant same-account model fallback; ordinary temporary model limits remain distinct.
+- Removed the built-in NVIDIA Kimi K3 entry after a live HTTP 410 response; HTTP 410 errors now identify an unavailable/retired model.
+
 - Native and fallback text tool protocols, argument assembly and bounded action repair.
 - File/directory creation contracts verify actual outputs and content before completion.
 - Verified simple filesystem receipts can finish without a redundant model confirmation call.
@@ -52,7 +60,7 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Verification
 
-- Latest recorded full local suite: **255 tests passed**.
+- Latest recorded full local suite: **261 tests passed**.
 - Changed response-presentation modules passed Python compilation.
 - Coverage includes actions/edits, context ownership and overflow, streaming/usage, cancellation/queue recovery, side-chat isolation, Ctrl+O, resume and terminal rendering.
 - Fixture tests do not establish every live provider/model combination. Agent Router can reject custom clients under its access policy; the adapter does not bypass that policy.

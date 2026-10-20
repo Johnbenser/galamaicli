@@ -115,11 +115,11 @@ Restart Galam after updating. Commit or set aside your own source changes before
 
 Open **`/settings` → Model Connections**. A separate editor opens, then returns to your existing settings screen.
 
-1. Type an **endpoint group**, or use **Choose endpoint** to assign the model to an existing group.
+1. Open **Choose endpoint**, select from the sorted, numbered list, then enter its number and press **Enter**. Endpoint names are selected rather than typed. For a new compatible service, choose a group such as **Direct** and supply its URL.
 2. Enter the provider's exact **model ID**.
-3. Paste a base URL such as `https://example.com/v1`, or the complete API URL.
-4. Choose **Chat Completions** (`/v1/chat/completions`) or **Responses** (`/v1/responses`). Responses is plural; a pasted `/v1/response` is corrected. Pasting a complete route selects its format automatically.
-5. Enter a credential variable name, or leave it blank to generate one. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
+3. Review the provider base URL filled by your selection, or paste a custom base/full URL. Changing provider clears the previous credential fields to avoid carrying a key to another service.
+4. Leave **Default: [format]** selected for the usual connection. It displays the model's known format, or the endpoint's most common catalog format, plus the resolved route. Use **Override: Chat Completions** or **Override: Responses** only when needed. API version prefixes such as `/v2` remain part of the URL. Responses is plural; a pasted `/v1/response` is corrected. Complete URLs select Default when they match it, or the appropriate override.
+5. Enter a credential variable name, or leave it blank. Matching provider hosts reuse the group's credential reference; other hosts get a generated reference. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
 6. Enter the **masked API key**. A blank field keeps an existing referenced key; a service requiring no key can leave it empty. Set the model's context window to its supported limit.
 7. Choose whether to **use this model now**, then save with the button or **Ctrl+S**.
 
@@ -129,7 +129,7 @@ Custom definitions live in **`~/.galam/endpoints.json`** and contain only routin
 
 Saving applies the credential in Galam immediately, so its next request needs no restart or manual source command. A guarded source line is added once to the selected home's `.bashrc` or `.zshrc` for future shells. An already-open parent terminal has its own environment; run `source ~/.secrets` there if you also need the updated variable outside Galam. Galam reads literal assignments itself and does not execute the rest of your secret file.
 
-New connections can join built-in endpoint groups without replacing their existing model routes. Editing built-in model definitions through this editor is rejected; load a saved custom profile to edit that profile. Models referring to the same credential variable share its key. These connections support OpenAI-compatible Chat Completions and Responses, including text, streaming, function calls and tool results; other API families such as embeddings or Anthropic Messages require their own adapters.
+New connections are assigned through the endpoint list and can join built-in endpoint groups without replacing their existing model routes. Editing built-in model definitions through this editor is rejected; load a saved custom profile to edit that profile. Models referring to the same credential variable share its key. These connections support OpenAI-compatible Chat Completions and Responses, including text, streaming, function calls and tool results; other API families such as embeddings or Anthropic Messages require their own adapters.
 
 ### Remote providers
 
@@ -447,7 +447,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 255 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise both API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 261 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise both API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
@@ -458,6 +458,7 @@ python -m unittest discover -s tests -q
 | [Local model manager](artifacts/LOCAL_MODEL_MANAGER.md) | Profiles, testing and tuning |
 | [Queue and session recovery](artifacts/SESSION_RECOVERY_QUEUE_RESUME.md) | Cancellation and resume behavior |
 | [Side chat and activity](artifacts/BTW_STATUS_RESUME_UPDATE.md) | `/btw`, progress labels and resume design |
+| [NVIDIA live check](artifacts/NVIDIA_CONNECTION_CHECK.md) | Authorized live requests, verified replies and unavailable models |
 | [Custom connections](artifacts/CUSTOM_CONNECTIONS.md) | Home storage, secret handling, UI and protocol verification |
 | [Response presentation](artifacts/RESPONSE_PRESENTATION_UPDATE.md) | Frozen completion, permanent footers and rendering |
 | [Output preview](artifacts/RESPONSE_LAYOUT_PREVIEW.txt) | Plain-text example of the terminal layout |

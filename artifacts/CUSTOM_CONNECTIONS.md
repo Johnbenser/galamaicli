@@ -4,7 +4,7 @@
 
 `/settings` → Model Connections opens a separate full-screen editor after the inline settings application exits and clears its own ten-line region. Closing the editor reopens the existing settings screen and keeps the conversation intact. Existing items and their action meanings are retained; the existing seven-item scroll window handles the added item.
 
-The editor supports an existing/new endpoint group, exact model ID, base/full URL, Chat Completions or Responses, credential variable, masked key, context window and optional immediate activation. Previously saved custom models can be loaded and edited. Complete route pastes select the format; `/response` is normalized to `/responses`. Feedback is rendered inside the application; saving prints no confirmation into its live layout. Escape cancels promptly and discards the key field.
+The editor supports a sorted, numbered endpoint selector, exact model ID, base/full URL, Default with its resolved format/route, optional Chat Completions or Responses overrides, credential variable, masked key, context window and optional immediate activation. Previously saved custom models can be loaded and edited. Complete route pastes select the format; `/response` is normalized to `/responses`. Feedback is rendered inside the application; saving prints no confirmation into its live layout. Escape cancels promptly and discards the key field.
 
 Main/side tasks must finish or be cancelled before editing connections. This avoids reconfiguring a live model exchange. Existing endpoint/settings screens remain available as before.
 
@@ -40,4 +40,12 @@ Official format references: [function calling](https://developers.openai.com/api
 - A streamed Responses fixture verifies the main router returns a complete action and provider-reported usage.
 - Keyboard-driven editor checks use a 44-column, 24-row output, masked input, Ctrl+S and Escape. Confirmation prints nothing outside the UI; cancellation writes no files.
 - The existing local-manager menu test was updated for the additional section while checking original actions, cursor behavior and manager disabling.
-- **Full final suite: 255 tests passed.** New custom-connection coverage: 27 tests. Changed modules passed Python compilation. No paid or external model calls were made. Real user secret and RC files were not modified for these tests; temporary homes contained all test credentials.
+- **Full final suite: 261 tests passed.** Custom-connection coverage: 33 tests. Changed modules passed Python compilation. The regression suite uses local fixtures. Authorized live NVIDIA checks are recorded separately in NVIDIA_CONNECTION_CHECK.md. Real user secret and RC files were not modified for these tests; temporary homes contained all test credentials.
+
+## Numbered selection and format defaults
+
+The editor no longer exposes an endpoint text field. Choose endpoint displays sorted numbers; typing a number and Enter selects it, including choices above nine. Arrow selection remains available in the list. Changing provider updates the known base URL and clears credential fields from the previous provider.
+
+Default shows the selected model's saved format when known; otherwise it uses the most common format in that endpoint catalog, with Chat Completions winning ties. This computation is local. The saved profile retains the concrete wire format and its default/override preference. Version prefixes are preserved in URLs. Complete routes and repeated suffixes are normalized before appending exactly one route. Ollama native `/api/chat` and known `/api` bases resolve to its compatible `/v1` interface, including saved malformed double-appended routes.
+
+Blank credential references reuse a group's variable only when the target host matches the group's host. A different host receives a generated variable. No credential value appears in the model catalog or form confirmation.

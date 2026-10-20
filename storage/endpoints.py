@@ -69,12 +69,6 @@ ENDPOINT_REGISTRY = {
                 "context_window": 128000,
                 "supports_streaming": True
             },
-            "moonshotai/kimi-k3": {
-                "name": "moonshotai/kimi-k3",
-                "display_name": "Kimi K3 (NVIDIA)",
-                "context_window": 128000,
-                "supports_streaming": True
-            },
             "nvidia/nemotron-3.5-lightning-30b-a3b": {
                 "name": "nvidia/nemotron-3.5-lightning-30b-a3b",
                 "display_name": "Nemotron 3.5 Lightning",
