@@ -82,6 +82,9 @@ def view_file(path: str, start_line: int = 1, end_line: int = 200) -> str:
         return f"Error: File not found at '{path}' (resolved: '{abs_path}')"
     if os.path.isdir(abs_path):
         return f"Error: '{path}' is a directory, not a file."
+    from engine.security import sensitive_path
+    if sensitive_path(abs_path):
+        return 'Error: Credential files are protected; inspect or configure them locally.'
 
     try:
         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
@@ -204,7 +207,10 @@ def search_files(query: str, directory: str = ".", max_results: int = 50) -> str
 
     # Try fast ripgrep or grep
     try:
-        cmd = ["grep", "-rnI", "--exclude-dir=.git", "--exclude-dir=__pycache__", query, abs_dir]
+        cmd = ["grep", "-rnI", "--exclude-dir=.git", "--exclude-dir=__pycache__", "--exclude-dir=.ssh", "--exclude-dir=.aws",
+               "--exclude=.secrets", "--exclude=.env*", "--exclude=*keys.json",
+               "--exclude=.galam_keys*", "--exclude=.netrc", "--exclude=.npmrc", "--exclude=.pypirc",
+               "--exclude=id_rsa", "--exclude=id_ed25519", "--exclude=id_ecdsa", "--", query, abs_dir]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
         lines = res.stdout.strip().splitlines()
         if lines:

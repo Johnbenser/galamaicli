@@ -157,6 +157,9 @@ DEFAULT_VALUES = {
     "temperature": 0.7,
     "max_tokens": 4096,
     "max_iterations": 25,
+    "task_request_limit": 128,
+    "task_token_limit": 120000,
+    "task_time_limit_seconds": 1800,
     "timeout": 60,
     "auto_execute": False
 }

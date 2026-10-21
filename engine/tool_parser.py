@@ -932,30 +932,6 @@ def extract_confident_command_from_reasoning(reasoning: str) -> List[Dict[str, A
                         }
                     }]
 
-    # General directory and file creation intent synthesis in reasoning
-    has_active_commitment = any(comm in conclusion_text.lower() for comm in (
-        "i will create", "i'll create", "let me create", "i'm going to create", "i am going to create",
-        "i need to create", "i will use", "i'll use", "let me run", "i will run"
-    ))
-    if has_active_commitment and not any(p in conclusion_text.lower() for p in ("the command for that is", "command would be", "already ran")):
-        dir_match = re.search(r'(?:in|inside|to)\s+(?:the\s+)?([/\w\.\-]+/[/\w\.\-]+)\s+directory', conclusion_text, re.IGNORECASE)
-        if dir_match and ("touch" in conclusion_text.lower() or "create" in conclusion_text.lower()):
-            target_dir = dir_match.group(1).strip()
-            if target_dir.startswith("/") and not any(k in target_dir.lower() for k in ("command", "tool")):
-                # If creator's name file creation is discussed:
-                if "name" in conclusion_text.lower():
-                    synth_cmd = f"mkdir -p {target_dir} && echo 'John Benser' > {target_dir}/name.txt"
-                    validated = _validate_and_normalize_tool("execute_bash", {"command": synth_cmd})
-                    if validated:
-                        norm_name, norm_args = validated
-                        return [{
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": norm_name,
-                                "arguments": json.dumps(norm_args)
-                            }
-                        }]
 
     return []
 

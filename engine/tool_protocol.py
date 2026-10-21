@@ -14,6 +14,7 @@ DESCRIPTIONS = {
     "manage_tasks": "List, inspect or stop Galam background tasks.",
     "read_action_output": "Retrieve stored output by action ID.",
     "undo_file_change": "Undo a Galam edit only when the user asks.",
+    "security_audit": "Read-only local audit for credential files, tracked secrets and unsafe TLS; returns findings without secret values.",
 }
 
 
@@ -59,6 +60,8 @@ def options(endpoint, model, messages, config):
     if mode == "none" or mode is None and not contextual_action(messages):
         return {}
     schemas = tool_schemas()
+    if not re.search(r'\b(?:security|secrets?|credentials?|audit)\b', latest_request(messages), re.I):
+        schemas = [tool for tool in schemas if tool['function']['name'] != 'security_audit']
     from engine.token_policy import enabled
     from engine.completion import explicit_report_command
     from engine.context_manager import is_user_request

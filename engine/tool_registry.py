@@ -10,6 +10,7 @@ TOOLS = {
     "manage_tasks": {"action": str, "target": str},
     "read_action_output": {"action_id": str, "start_line": int, "end_line": int, "query": str},
     "undo_file_change": {"edit_id": str},
+    "security_audit": {"directory": str},
 }
 REQUIRED = {
     "make_directory": ("path",),
@@ -18,6 +19,7 @@ REQUIRED = {
     "replace_file_content": ("path", "target_content", "replacement_content"),
     "search_files": ("query",), "manage_tasks": (),
     "read_action_output": ("action_id",), "undo_file_change": ("edit_id",),
+    "security_audit": (),
 }
 
 

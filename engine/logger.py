@@ -74,7 +74,9 @@ def log_model_interaction(
     with _LOG_LOCK:
         try:
             with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                from engine.security import redact
+                f.write(json.dumps(redact(entry), ensure_ascii=False) + "\n")
+            os.chmod(log_path, 0o600)
         except Exception:
             pass
 
@@ -108,7 +110,9 @@ def log_tool_execution(
     with _LOG_LOCK:
         try:
             with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                from engine.security import redact
+                f.write(json.dumps(redact(entry), ensure_ascii=False) + "\n")
+            os.chmod(log_path, 0o600)
         except Exception:
             pass
 
@@ -140,6 +144,8 @@ def log_galam_system_event(
     with _LOG_LOCK:
         try:
             with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                from engine.security import redact
+                f.write(json.dumps(redact(entry), ensure_ascii=False) + "\n")
+            os.chmod(log_path, 0o600)
         except Exception:
             pass

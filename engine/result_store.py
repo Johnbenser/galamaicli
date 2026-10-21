@@ -53,6 +53,8 @@ def archive_context(text):
 
 
 def store_result(result):
+    from engine.security import redact
+    result.output = redact(result.output)
     if result.output_path:
         return result
     try:

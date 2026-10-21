@@ -16,7 +16,7 @@ def next_mode(value):
 
 
 def is_safe_read(tool_name, args):
-    if tool_name in ("view_file", "search_files", "read_action_output"):
+    if tool_name in ("view_file", "search_files", "read_action_output", "security_audit"):
         return True
     if tool_name != "execute_bash":
         return False
@@ -56,5 +56,8 @@ def is_safe_read(tool_name, args):
 
 
 def requires_review(mode, tool_name, args):
+    from engine.security import review_reason
+    if review_reason(tool_name, args):
+        return True
     mode = normalize_mode(mode)
     return mode == "REVIEW" or (mode == "AUTO" and not is_safe_read(tool_name, args))

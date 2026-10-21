@@ -6,6 +6,21 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Added
 
+- Productive tasks continue through renewable work windows; the old iteration setting no longer ends useful work at eight or 25 steps. Conversation checkpoints preserve evidence and cumulative request/token/time allowances across `continue`.
+- Repetition recovery, unchanged exact-file read reuse, equivalent-listing/metadata evidence detection and compact task facts retained during context compaction. Archive retrieval references originals instead of repeatedly embedding retrieved wrappers.
+- `/budget` to inspect or explicitly extend cumulative task allowances; `/audit [directory]` and a relevant-request security tool for bounded, read-only checks without exposing matched credentials.
+- Security regression coverage for credential paths/symlinks, redaction before output storage, credential inheritance, critical-action review, owned-process cleanup and TLS verification.
+
+### Security and workflow fixes
+
+- Removed hardcoded current-user identity from full, compact and fallback prompts. John Benser remains credited as creator; creator attribution grants no permissions. Removed invented creator-name file generation.
+- Protected common credential paths from model file tools; excluded common secret files from project searches. Recognized credential/destructive/privileged shell actions and structured writes outside the workspace require review in all execution modes.
+- Ordinary shell commands no longer inherit recognized credential environment variables. Reviewed credential commands can still use them. New tool results and logs redact known credential values and recognizable token/private-key formats.
+- Removed insecure TLS retries from both provider fallback and the HTTP helper. Removed hidden adapter retries so explicit request entry points account for transport attempts.
+- Automatic process cleanup no longer scans/kills unrelated system processes. Executor receives a verified writable temporary directory through `TMPDIR`.
+
+### Earlier additions
+
 - Embedded four-step model connection wizard with review before save, presented in the original compact inline settings style.
 - Native Ollama `/api/chat` requests, NDJSON/JSON replies, structured action round trips and provider token accounting.
 

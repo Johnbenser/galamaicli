@@ -306,9 +306,29 @@ An action is more than text that looks like a command. Galam parses a complete t
 |---|---|
 | `review` | Tool actions require review. |
 | `auto` | Recognized safe reads can proceed; other actions require review. |
-| `always-proceed` | Actions proceed without an interactive review prompt. |
+| `always-proceed` | Ordinary actions proceed; recognized critical actions still require review. |
 
 Switch with `/mode review`, `/mode auto`, or `/mode always-proceed`. These are execution policies, not an OS sandbox. Actions run with the permissions of the current terminal process.
+
+### Continuing difficult tasks
+
+`max_iterations` now sets a work checkpoint window rather than ending a task after a fixed number of steps. Galam can continue productive tasks beyond eight or 25 model turns. It retains compact evidence within the conversation, reuses unchanged exact file reads, and attempts recovery when repeated work produces no new evidence. Four consecutive rounds without new evidence stop with an honest, saved checkpoint after a recovery prompt.
+
+Independent cumulative task allowances prevent runaway spending: **128 provider requests, approximately 120,000 tokens, or 1,800 seconds of active task time**, whichever is reached first. Provider-reported usage is used when available; otherwise the guard uses estimates. These are application safeguards, not a guarantee of a provider bill or cost. The next request reserves estimated input and configured output before sending. Tool verification does not spend a model-turn allowance. Time checks happen between operations; they do not preempt an in-flight operation.
+
+Use `/budget` to inspect allowances, or explicitly extend one with `/budget tokens 240000`, `/budget requests 256`, or `/budget seconds 3600`. Then `continue` resumes the saved task with its accumulated spend. Starting a different task creates a fresh allowance. Checkpoint creation, duplicate detection and `/budget` make no AI requests. Compact evidence is pinned when context needs compaction, rather than duplicated into every short prompt.
+
+### Security and user identity
+
+John Benser is credited as the creator. Installing Galam does **not** identify the installer as John or grant creator privileges. Each current user operates with their own terminal permissions, settings, credentials and selected conversation.
+
+- `/audit [directory]` runs bounded, read-only local checks for credential files, tracked credential paths, recognizable embedded tokens, insecure TLS code and remote script execution. Findings contain paths/categories, not matched values. It makes no AI calls and changes no files. The model can request the same audit when relevant.
+- Model file tools protect common credential paths, including symlink targets. Project searches exclude common secret files. Configure keys through settings or edit them locally.
+- Shell commands do not inherit recognized API keys/tokens/passwords by default. Recognized credential access requires review; after approval, that command can use credentials. Known environment secret values and recognizable token/private-key formats are redacted from tool observations and new diagnostic records.
+- Recognized destructive/privileged shell commands and structured writes outside the current workspace or into Git metadata require review in every mode. Automatic server cleanup stops only processes tracked as launched by this Galam instance.
+- Provider fallback and HTTP helper transports retain TLS certificate verification. Repair the system CA configuration when a certificate check fails; do not disable verification.
+
+These are heuristic safeguards, **not a security sandbox or a complete vulnerability scan**. Approved shell commands and project programs can access files with the terminal user's permissions. Use an isolated OS account/container for untrusted projects. The audit excludes dependency vulnerability feeds, running services and complete Git history. Previously saved logs/history are not retroactively scrubbed; do not publish them.
 
 ### File editing and verification
 
@@ -419,6 +439,8 @@ Resume replays recent messages, restores the chat's complete saved context, and 
 | `/queue` · `/queue clear` | Inspect or discard pending prompts |
 | `/cancel` | Cancel the current main task |
 | `/tasks` | Inspect/manage background tasks |
+| `/audit [directory]` | Run a read-only local security audit without an AI request |
+| `/budget [tokens\|requests\|seconds NUMBER]` | Inspect or explicitly change task allowances |
 | `/local` | Local model testing and owned-server commands |
 | `/artifact` | Review generated artifacts |
 | `/changelog` | Render the repository's recorded updates and bug fixes |
@@ -450,11 +472,12 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 286 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 312 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting, productive work beyond 25 rounds, repetition recovery, cumulative allowances and security checks. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Scripted model tests are distinct from live endpoint compatibility; the progress/security update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
 | [Changelog](CHANGELOG.md) | Consolidated improvements and bug fixes |
+| [Progress and security](artifacts/PROGRESS_SECURITY.md) | Renewable work, task spending, audit checks and user identity |
 | [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |
 | [Pipeline upgrade](artifacts/PIPELINE_UPGRADE_NOTES.md) | Parsing, validation, action results and recovery |
 | [Token optimization](artifacts/TOKEN_OPTIMIZATION_REPORT.md) | Context and request-budget work |

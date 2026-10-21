@@ -73,7 +73,7 @@ class TaskManager:
                     (target_str in ("py", "python") and any(k in str(t.get("full_cmd", "")).lower() for k in ("python", "python3", "py "))) or
                     (target_str in ("react", "vite", "next", "node") and any(k in str(t.get("full_cmd", "")).lower() for k in ("node", "vite", "next", "npm", "yarn", "bun", "pnpm")))
                 )
-                if match:
+                if match and t.get("process") is not None and t["process"].poll() is None:
                     proc = t.get("process")
                     pid = t.get("pid")
                     try:
@@ -89,55 +89,7 @@ class TaskManager:
                     self.tasks.remove(t)
                     return True
 
-        # External fallback: if target is a known framework stack
-        external_targets = {
-            "python": "python",
-            "py": "python",
-            "react": "vite",
-            "vite": "vite",
-            "next": "next",
-            "node": "node"
-        }
-        if target_str in external_targets:
-            proc_pattern = external_targets[target_str]
-            # NEVER kill python globally as it terminates Galam CLI itself!
-            if proc_pattern == "python":
-                # Only terminate python server scripts
-                freed = False
-                for p in glob.glob("/proc/[0-9]*"):
-                    pid_str = os.path.basename(p)
-                    try:
-                        p_int = int(pid_str)
-                        if p_int in (os.getpid(), os.getppid()):
-                            continue
-                        with open(f"{p}/cmdline", "rb") as f:
-                            raw_cmd = f.read().decode("utf-8", errors="replace").replace("\x00", " ")
-                        if not raw_cmd.strip() or "galam.py" in raw_cmd:
-                            continue
-                        if any(k in raw_cmd for k in ("http.server", "server.py", "app.py")):
-                            os.kill(p_int, signal.SIGTERM)
-                            freed = True
-                    except Exception:
-                        pass
-                return freed
-            else:
-                res = subprocess.run(f"pkill -f {proc_pattern}", shell=True)
-                return res.returncode == 0
-
-        # External fallback: if target is a port number
-        if target_str.isdigit() and len(target_str) >= 4:
-            freed = self.free_port(int(target_str))
-            res = subprocess.run(f"fuser -k -n tcp {target_str} 2>/dev/null", shell=True)
-            return freed or res.returncode == 0
-
-        # External fallback: if target is a PID number
-        if target_str.isdigit():
-            try:
-                os.kill(int(target_str), signal.SIGTERM)
-                return True
-            except Exception:
-                pass
-
+        # Processes not launched and tracked by this instance are never killed.
         return False
 
     def is_port_in_use(self, port: int) -> bool:
@@ -184,12 +136,13 @@ class TaskManager:
         return pids
 
     def free_port(self, port: int, cmd_hint: str = "") -> bool:
-        """Terminates any background process (internal or external) occupying the specified port."""
+        """Stop only live processes launched and tracked by this Galam instance."""
         freed = False
         # 1. Stop internal tasks on this port
         with self._lock:
             for t in list(self.tasks):
-                if str(t.get("port")) == str(port) or (cmd_hint and cmd_hint in str(t.get("full_cmd"))):
+                if (str(t.get("port")) == str(port) and t.get("process") is not None
+                        and t["process"].poll() is None):
                     pid = t.get("pid")
                     try:
                         os.killpg(os.getpgid(pid), signal.SIGKILL)
@@ -201,25 +154,13 @@ class TaskManager:
                     self.tasks.remove(t)
                     freed = True
 
-        # 2. Stop external orphaned processes via /proc scan
-        conflicting = self.find_conflicting_pids(str(port), cmd_hint)
-        for c_pid in conflicting:
-            try:
-                os.kill(c_pid, signal.SIGTERM)
-                time.sleep(0.1)
-                os.kill(c_pid, signal.SIGKILL)
-                freed = True
-            except OSError:
-                pass
-
-        # 3. Termux fuser fallback
-        subprocess.run(f"fuser -k -n tcp {port} 2>/dev/null", shell=True)
-        time.sleep(0.15)
         return freed
 
     def stop_all(self):
         with self._lock:
             for t in list(self.tasks):
+                if t.get("process") is None or t["process"].poll() is not None:
+                    continue
                 pid = t.get("pid")
                 try:
                     os.killpg(os.getpgid(pid), signal.SIGKILL)
@@ -240,36 +181,6 @@ class TaskManager:
         self.cleanup_dead_tasks()
         with self._lock:
             active_list = list(self.tasks)
-            # Solid persistence: Also discover any background servers running on the system
-            # (e.g. if started before CLI restart or unmonitored child process)
-            existing_pids = {t.get("pid") for t in active_list}
-            my_pid = os.getpid()
-            for p in glob.glob("/proc/[0-9]*"):
-                pid_str = os.path.basename(p)
-                try:
-                    pid_int = int(pid_str)
-                    if pid_int in existing_pids or pid_int == my_pid:
-                        continue
-                    with open(f"{p}/cmdline", "rb") as f:
-                        raw_cmd = f.read().decode("utf-8", errors="replace").replace("\x00", " ").strip()
-                    if not raw_cmd or "galam.py" in raw_cmd:
-                        continue
-                    if any(k in raw_cmd for k in ("http.server", "server.py", "app.py", "vite", "next dev", "uvicorn", "flask run")):
-                        disp_cmd, port = self.extract_server_target(raw_cmd)
-                        discovered = {
-                            "id": len(self.tasks) + 1,
-                            "cmd": disp_cmd,
-                            "full_cmd": raw_cmd,
-                            "start_time": "background",
-                            "pid": pid_int,
-                            "port": port,
-                            "process": None
-                        }
-                        self.tasks.append(discovered)
-                        existing_pids.add(pid_int)
-                        active_list.append(discovered)
-                except Exception:
-                    pass
             return active_list
 
     def is_server_command(self, cmd: str) -> bool:
@@ -455,10 +366,19 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
     """One result contract; existing callers can still unpack (output, background)."""
     started = time.monotonic()
     expected_hash = args.get("_expected_hash") if isinstance(args, dict) else None
+    credential_access = bool(args.get('_credential_access')) if isinstance(args, dict) else False
     try:
         args = validate_arguments(tool_name, args)
-        if tool_name == "execute_bash":
-            result = as_result(execute_shell_action(args["command"]))
+        from engine.security import sensitive_path, audit_project
+        if tool_name in ('view_file', 'write_file', 'replace_file_content') and sensitive_path(resolve_session_path(args['path'])):
+            raise ValueError('Credential files are protected from model file tools. Use settings or edit them locally; do not send secret values to a model.')
+        if tool_name == 'search_files' and sensitive_path(resolve_session_path(args.get('directory', '.'))):
+            raise ValueError('Credential files are excluded from model searches.')
+        if tool_name == 'security_audit':
+            result = ActionResult(audit_project(resolve_session_path(args.get('directory', '.'))), verified=True)
+        elif tool_name == "execute_bash":
+            result = as_result(execute_shell_action(args["command"], allow_credentials=True)
+                               if credential_access else execute_shell_action(args["command"]))
         elif tool_name == "make_directory":
             path = resolve_session_path(args["path"])
             existed = os.path.isdir(path)
@@ -468,7 +388,7 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
             result = ActionResult(f"{'Verified existing' if existed else 'Created'} directory '{path}'.",
                                   verified=True, metadata={"path": path, "kind": "directory", "changed": not existed})
         elif tool_name == "read_action_output":
-            result = ActionResult(read_action_output(**args))
+            result = ActionResult(read_action_output(**args), metadata={'source_id': args['action_id']})
         elif tool_name == "undo_file_change":
             from engine.edit_journal import undo_edit
             result = ActionResult(undo_edit(args["edit_id"], session_directory()), verified=True)
@@ -496,6 +416,8 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
             result = as_result(_execute_tool_call_legacy(tool_name, args, invoking_model))
     except Exception as error:
         result = ActionResult(f"Error: {error}", False, 1, status="failed")
+    from engine.security import redact
+    result.output = redact(result.output)
     result = store_result(result)
     log_tool_execution(tool_name=tool_name, args=args, stdout_preview=result.output,
                        duration_ms=(time.monotonic() - started) * 1000,
@@ -506,6 +428,16 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
 def get_subprocess_env() -> dict:
     """Returns an enriched environment dictionary ensuring $API_KEYS and all endpoint keys are available."""
     env = os.environ.copy()
+    import tempfile
+    from engine.result_store import runtime_dir
+    candidate = env.get('TMPDIR')
+    if not candidate or not os.path.isdir(candidate) or not os.access(candidate, os.W_OK):
+        candidate = str(runtime_dir('tmp'))
+    try:
+        with tempfile.TemporaryFile(dir=candidate):
+            env['TMPDIR'] = candidate
+    except OSError:
+        env.pop('TMPDIR', None)
     if "API_KEYS" in env and "API_KEY" not in env:
         env["API_KEY"] = env["API_KEYS"]
     elif "API_KEY" in env and "API_KEYS" not in env:
@@ -541,28 +473,17 @@ def python_curl(url: str, method: str = "GET", headers: dict = None, data: Any =
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
         return f"[HTTP {e.code}]: {err_body}", e.code
-    except Exception:
-        # Fallback to unverified SSL (essential in Termux when root certificates are not present)
-        try:
-            ctx_unverified = ssl._create_unverified_context()
-            req2 = urllib.request.Request(url, data=req_data, headers=headers, method=method.upper())
-            with urllib.request.urlopen(req2, timeout=timeout, context=ctx_unverified) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                return body, resp.status
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
-            return f"[HTTP {e.code}]: {err_body}", e.code
-        except Exception as ex2:
-            return f"[Python Curl Error: {ex2}]", -1
+    except Exception as error:
+        return f"[Python Curl Error: {error}; TLS verification remains enabled]", -1
 
-def parse_and_run_curl_command(cmd_str: str) -> Optional[Tuple[str, bool]]:
+def parse_and_run_curl_command(cmd_str: str, env=None) -> Optional[Tuple[str, bool]]:
     """
     Parses a curl command string, expands shell variables ($API_KEYS, etc.),
     and executes via Python standard library urllib.request.
     """
     try:
-        env = get_subprocess_env()
-        expanded_cmd = os.path.expandvars(cmd_str)
+        env = get_subprocess_env() if env is None else env
+        expanded_cmd = cmd_str
         for k, v in env.items():
             if f"${k}" in cmd_str:
                 expanded_cmd = expanded_cmd.replace(f"${k}", v)
@@ -759,11 +680,11 @@ def _prepare_navigation(command: str):
     return replacement + command[match.end():], target
 
 
-def execute_shell_action(cmd: str):
-    return store_result(as_result(_execute_shell_action_legacy(cmd)))
+def execute_shell_action(cmd: str, allow_credentials=False):
+    return store_result(as_result(_execute_shell_action_legacy(cmd, allow_credentials)))
 
 
-def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
+def _execute_shell_action_legacy(cmd: str, allow_credentials=False) -> Tuple[str, bool]:
     clean_cmd = cmd.strip()
     if not clean_cmd:
         return "", False
@@ -796,6 +717,9 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
             return "[Storage permission command completed]", False
 
     sub_env = get_subprocess_env()
+    if not allow_credentials:
+        from engine.security import public_environment
+        sub_env = public_environment(sub_env)
 
     if GLOBAL_TASK_MANAGER.is_server_command(clean_cmd):
         disp_cmd, port = GLOBAL_TASK_MANAGER.extract_server_target(clean_cmd)
@@ -984,7 +908,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
 
             # Check for curl missing or failing in Termux: fallback to Python curl
             if is_curl_cmd and (res.returncode != 0 or not out.strip() or any(err in out.lower() for err in ("command not found", "not found", "curl: (", "curl: error"))):
-                py_curl_res = parse_and_run_curl_command(clean_cmd)
+                py_curl_res = parse_and_run_curl_command(clean_cmd, env=sub_env)
                 if py_curl_res is not None:
                     c_body, c_error = py_curl_res
                     if c_body and not c_error and not c_body.startswith("[Python Curl Error"):

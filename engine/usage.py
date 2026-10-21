@@ -24,6 +24,9 @@ def ledger():
 
 
 def begin_request(endpoint,model,payload,delta=False):
+    guard = ledger().get('_before_request')
+    if guard:
+        guard(payload)
     row = {'endpoint':endpoint,'model':model,'estimated_input_tokens':estimate_tokens(payload),
            'usage_source':'unavailable','_delta':delta}
     ledger()['requests'].append(row)

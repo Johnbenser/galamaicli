@@ -359,6 +359,26 @@ def handle_slash_command(user_input, messages, conversation_id):
     elif cmd == "/local":
         from engine.local_commands import handle_local_command
         handle_local_command(arg)
+    elif cmd == '/audit':
+        from engine.security import audit_project
+        try:
+            print('\n' + audit_project(resolve_session_path(arg or '.')) + '\n')
+        except (OSError, ValueError) as error:
+            print(f'Local audit failed: {error}')
+    elif cmd == '/budget':
+        fields = {'tokens': 'task_token_limit', 'requests': 'task_request_limit',
+                  'seconds': 'task_time_limit_seconds'}
+        values = arg.split()
+        if not values:
+            print('\nTask allowances: ' + ', '.join(f'{name}={CONFIG.get(key)}' for name, key in fields.items()))
+            print('Change explicitly: /budget tokens 240000 | /budget requests 256 | /budget seconds 3600\n')
+        elif len(values) == 2 and values[0] in fields and values[1].isdigit() and int(values[1]) > 0:
+            key, value = fields[values[0]], int(values[1])
+            save_settings(**{key: value})
+            CONFIG[key] = value
+            print(f'\nTask {values[0]} allowance set to {value:,}. Saved usage is preserved; continue to resume.\n')
+        else:
+            print('Usage: /budget [tokens|requests|seconds POSITIVE_NUMBER]')
     elif cmd == "/model":
         handle_model_menu()
         sys.stdout.write("\n\033[38;5;244m[Model updated · Chat session preserved]\033[0m\n\n")
@@ -565,7 +585,7 @@ from engine.task_contract import TaskContract
 
 
 @task_lifecycle
-def run_agent_loop(messages, conversation_id, max_steps=None):
+def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
     bind_messages(messages, conversation_id)
     if max_steps is None:
         max_steps = int(CONFIG.get("max_iterations", 25))
@@ -578,6 +598,11 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
     completed = False
     from engine.context_manager import task_request
     current_request = task_request(messages)
+    from engine.task_progress import TaskProgress, TaskBudgetExceeded
+    from engine.usage import ledger
+    workflow = TaskProgress(messages, current_request, session_directory(), CONFIG, max_steps, checkpoint)
+    ledger()['_workflow'] = workflow
+    ledger()['_before_request'] = workflow.before_request
     action_requested, code_change_requested = request_intent(current_request)
     from engine.context_manager import contextual_action
     action_requested = action_requested or contextual_action(messages)
@@ -603,12 +628,19 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
         sys.stdout.write("\r\033[2K"+assistant_text(receipt))
         sys.stdout.flush()
 
-    while step < max_steps:
+    while True:
         step += 1
         is_verification = False
 
         if AGENT_STATE.get("abort", False):
             break
+
+        local_step = bool(pending_checks or step == 1 and direct_command)
+        if workflow.begin_round(model=not local_step):
+            break
+        recovery = workflow.recovery()
+        if recovery:
+            messages.append(recovery)
 
         try:
             if pending_checks:
@@ -624,6 +656,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             else:
                 resp_raw = (query_planning_graph(messages) if use_lang_workflow
                             else query_with_fallback(messages))
+        except TaskBudgetExceeded as error:
+            workflow.stop_reason = str(error)
+            break
         except TaskCancelled:
             print('\nCurrent task cancelled. Queued prompts will continue.\n')
             break
@@ -666,6 +701,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
             sys.stdout.flush()
             break
         if isinstance(response_msg, str) and response_msg in ("FAILED", "EXHAUSTED", "CANCELLED"):
+            if workflow.stop_reason:
+                break
             AGENT_STATE['task_outcome']='cancelled' if response_msg=='CANCELLED' else 'failed'
             if last_tool_result:
                 tool_name, output, succeeded, _ = last_tool_result
@@ -863,8 +900,10 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     with open(target_path, "rb") as existing_file:
                         current_hash = hashlib.sha256(existing_file.read()).hexdigest()
                     if inspected_files.get(target_path) != current_hash:
-                        inspection, _ = execute_tool_call("view_file", {"path": target_path,
-                                                                          "start_line": 1, "end_line": 200})
+                        inspection_args = {"path": target_path, "start_line": 1, "end_line": 200}
+                        inspection_result = as_result(execute_tool_call('view_file', inspection_args))
+                        workflow.observe('view_file', inspection_args, inspection_result, session_directory())
+                        inspection, _ = inspection_result
                         if inspection.startswith("Error:"):
                             rejected_in_this_step = True
                             messages.append({"role": "user", "_galam_internal": True, "content": inspection})
@@ -891,10 +930,12 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
 
             call_signature = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
             execution_key = (call_signature, workspace_revision)
-            if execution_key in executed_commands:
+            if execution_key in executed_commands and tool_name not in ('view_file', 'search_files', 'read_action_output', 'execute_bash'):
                 continue
 
             mode = normalize_mode(CONFIG.get("mode"))
+            from engine.security import review_reason
+            sensitive_command = review_reason(tool_name, args).startswith('Credential')
             progress(f"Preparing {tool_name}" if not requires_review(mode, tool_name, args) else f"Waiting for approval: {tool_name}")
             cmd_preview = args.get("command", "") if tool_name == "execute_bash" else f"{tool_name}({args.get('path', args.get('query', ''))})"
             if not requires_review(mode, tool_name, args):
@@ -937,11 +978,20 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     pass
 
             active_model = CONFIG.get("active_model", "")
+            if sensitive_command:
+                # Added only after validation and a positive review, never by the model.
+                args['_credential_access'] = True
             if tool_name in ("write_file", "replace_file_content"):
                 path = resolve_session_path(args["path"])
                 if path in inspected_files:
                     args["_expected_hash"] = inspected_files[path]
-            action_result = as_result(execute_tool_call(tool_name, args, invoking_model=active_model))
+            cache_key = workflow.read_key(tool_name, args, session_directory())
+            action_result = workflow.cache.get(cache_key) if cache_key else None
+            if action_result is None:
+                action_result = as_result(execute_tool_call(tool_name, args, invoking_model=active_model))
+                if cache_key and action_result.success:
+                    workflow.cache[cache_key] = action_result
+            workflow.observe(tool_name, args, action_result, session_directory())
             action_events.append({"tool": tool_name, "args": dict(args), "result": action_result,
                                   "verification": is_verification})
             out, is_bg = action_result
@@ -1030,6 +1080,7 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 "_galam_action": {"id": action_result.action_id, "status": action_result.status,
                                   "exit_code": action_result.exit_code, "output_path": action_result.output_path,
                                   "tool": tool_name, "path": action_result.metadata.get('path'),
+                                  "source_id": action_result.metadata.get('source_id'),
                                   "content_hash": action_result.metadata.get('content_hash')}
             })
             executed_in_this_step += 1
@@ -1076,14 +1127,14 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
         if executed_in_this_step == 0:
             if rejected_in_this_step:
                 invalid_tool_retries += 1
-                if invalid_tool_retries < 4 and step < max_steps:
+                if invalid_tool_retries < 4:
                     continue
                 sys.stdout.write(f"  Incomplete: no valid command was provided for {current_request}.\n\n")
                 AGENT_STATE['task_outcome']='incomplete'
                 sys.stdout.flush()
                 break
             if last_tool_result and not last_tool_result[2]:
-                if step < max_steps:
+                if not workflow.stop_reason:
                     messages.append({
                         "role": "user",
                         "content": "The last tool failed and this tool call repeats a previous attempt. Inspect the error and try a different corrective action.",
@@ -1096,6 +1147,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     "Call write_file with real content, or inspect and use replace_file_content. Do not claim completion.")})
                 continue
             if is_post_tool_turn:
+                if requires_server and not any(event['result'].success and event['result'].is_background for event in action_events):
+                    continue
                 sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai Action Completed\033[0m\n\n")
                 sys.stdout.write("  \033[1;32m✓\033[0m \033[1;37mAction executed and verified with exit status 0.\033[0m\n\n")
                 if last_tool_result and last_tool_result[0] == "view_file" and not code_change_requested:
@@ -1117,12 +1170,12 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 sys.stdout.flush()
             break
 
-    if step >= max_steps and not completed:
+    if workflow.stop_reason and not completed:
         AGENT_STATE['task_outcome']='incomplete'
-        result = (f"Last result ({last_tool_result[0]}): {last_tool_result[1][:1000]}"
-                  if last_tool_result else "No requested action was executed.")
-        sys.stdout.write(f"\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n  Incomplete: step limit reached.\n  Summary: {result}\n\n")
-        sys.stdout.flush()
+        workflow.finish('incomplete')
+        finish_receipt('Incomplete: ' + workflow.stop_reason + '\n'
+                       + workflow.state.get('last_result', 'No requested action was executed.')
+                       + '\nThe checkpoint is saved in this conversation. Resume preserves its cumulative allowance.')
 
 TASK_QUEUE = MessageQueue()
 
@@ -1139,7 +1192,7 @@ def agent_worker_loop():
                 from engine.transparency import safe_display
                 print(f'\n> {safe_display(user_msg)}\n')
             msgs.append({"role": "user", "content": user_msg})
-            run_agent_loop(msgs, conv_id)
+            run_agent_loop(msgs, conv_id, checkpoint=lambda: persist_conversation(conv_id, msgs))
         except Exception as err:
             log_galam_system_event(
                 event_type="WORKER_EXECUTION_ERROR",

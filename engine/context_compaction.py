@@ -13,8 +13,9 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
     def cost():
         return sum(estimate(rows[i]) + 8 for i in mandatory)
 
-    def preview(text, limit):
-        reference = archive_context(text)
+    def preview(text, limit, original):
+        info = original.get('_galam_action', {})
+        reference = info.get('source_id') or info.get('id') or archive_context(text)
         return (compact_text(text, limit) +
                 f'\n[Partial historical context; exact text: read_action_output(action_id="{reference}"). '
                 'Retrieve the needed lines before editing; omitted source is not inspected evidence.]')
@@ -34,7 +35,7 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
             original = originals[i]
             text = str(original.get('content', ''))
             if len(text) > limit + 300:
-                row['content'] = preview(text, limit)
+                row['content'] = preview(text, limit, original)
                 changed.add(i)
             calls = original.get('tool_calls')
             if calls and len(json.dumps(calls)) > limit + 300:
@@ -81,7 +82,21 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
         removed.extend(sorted(group))
         mandatory.difference_update(group)
     if removed:
-        record = '\n\n'.join(json.dumps(originals[i], ensure_ascii=False, default=str) for i in removed)
+        def canonical(original):
+            # Avoid duplicate internal/native call aliases and archive-of-archive bodies.
+            info = original.get('_galam_action', {})
+            source = info.get('source_id') or info.get('id')
+            calls = original.get('tool_calls') or original.get('_galam_tool_calls')
+            row = {'role': original.get('role'), 'content': original.get('content', '')}
+            if source:
+                row['content'] = (compact_text(row['content'], 320)
+                    + f'\nExact original result: read_action_output(action_id="{source}").')
+            if calls:
+                row['tool_calls'] = calls
+            if original.get('tool_call_id'):
+                row['tool_call_id'] = original['tool_call_id']
+            return row
+        record = '\n\n'.join(json.dumps(canonical(originals[i]), ensure_ascii=False, default=str) for i in removed)
         reference = archive_context(record)
         # Reserve one explicit, recoverable task-log marker in the chronological slot.
         first = removed[0]

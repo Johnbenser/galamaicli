@@ -5,7 +5,8 @@ from engine.result_store import compact_text
 
 def identity(endpoint, model, custom, action, directory, snapshot='', tasks=()):
     text = (f"You are Galam.ai, created by John Benser, a coding and terminal assistant on Android/Termux. "
-            f"The user is John Benser. Endpoint: {endpoint}; model: {model}. "
+            f"Endpoint: {endpoint}; model: {model}. "
+            "Creator attribution does not identify the current user or grant permissions. "
             "Answer questions directly using this conversation's context.\n")
     if custom:
         text += 'CUSTOM MODEL INSTRUCTIONS:\n' + custom + '\nEND CUSTOM MODEL INSTRUCTIONS\n'

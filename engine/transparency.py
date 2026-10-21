@@ -83,6 +83,12 @@ def task_lifecycle(function):
             from engine.response_stats import attach,footer
             cancelled=cancel_event.is_set() or state.get('abort',False)
             status='cancelled' if cancelled else 'failed' if failed else state.get('task_outcome','completed')
+            from engine.usage import ledger
+            workflow = ledger().get('_workflow')
+            if workflow:
+                workflow.finish(status)
+            ledger().pop('_before_request', None)
+            ledger().pop('_workflow', None)
             stats={'elapsed':max(0,time.monotonic()-started_at),'finished_at':time.time(),
                    'cancelled':bool(cancelled),'status':status,'usage':totals()}
             state['last_task_timing']=stats

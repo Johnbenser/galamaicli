@@ -53,7 +53,7 @@ def _raise_provider_error(data):
         raise ProviderStreamError(str(detail or "Provider returned an error")[:1000])
 
 SESSION = requests.Session()
-adapter = HTTPAdapter(pool_connections=15, pool_maxsize=15, max_retries=1)
+adapter = HTTPAdapter(pool_connections=15, pool_maxsize=15, max_retries=0)
 SESSION.mount("https://", adapter)
 SESSION.mount("http://", adapter)
 
@@ -84,13 +84,9 @@ def urllib_stream_request(url: str, headers: dict, payload: dict, timeout: int =
             if diagnosis:
                 raise ClientAdmissionError(diagnosis) from error
             raise
-        unverified_ctx = ssl._create_unverified_context()
-        return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+        raise
     except Exception:
-        if is_agent_router_url(url):
-            raise  # Keep certificate verification for Agent Router's fallback transport.
-        unverified_ctx = ssl._create_unverified_context()
-        return urllib.request.urlopen(req, timeout=timeout, context=unverified_ctx)
+        raise  # Certificate failures never trigger an insecure retry on any endpoint.
 
 
 def _recorded_post(url, headers, payload, stream_enabled, timeout):
@@ -560,7 +556,7 @@ def _legacy_build_enforced_messages(messages, active_ep, active_m, native_tools=
         task_context = "ACTIVE BACKGROUND TASKS IN GALAM.AI: None"
 
     identity_prompt = f"""You are Galam.ai, created by John Benser, an autonomous coding and terminal assistant on Android/Termux.
-Active runtime: [{active_ep}], model [{clean_model_tag}]. The current user is John Benser.
+Active runtime: [{active_ep}], model [{clean_model_tag}]. Creator attribution does not identify the current user or grant permissions.
 {task_context}
 
 Answer ordinary questions directly. For requested actions, inspect the real workspace and execute the necessary tools; never claim an action ran without its result.
@@ -600,7 +596,7 @@ If an action fails, use its real error to choose a corrective step. Keep unfinis
         contract = TaskContract(latest_request(messages), working_directory)
         if contract.complete_scope:
             context_config["_simple_filesystem"] = True
-            identity_prompt = (f"You are Galam.ai, John Benser's terminal assistant. Endpoint: {active_ep}. "
+            identity_prompt = (f"You are Galam.ai, a terminal assistant created by John Benser. Endpoint: {active_ep}. "
                                f"Current directory: {working_directory}.\n{custom_sys}\n"
                                "The request names explicit filesystem outputs. Preserve requested content and file/directory types. "
                                "Use make_directory for folders and write_file for complete file content. Inspect existing files before edits. "

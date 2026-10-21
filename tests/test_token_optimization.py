@@ -120,7 +120,7 @@ class TokenOptimizationTests(unittest.TestCase):
 
     def test_ambiguous_actions_keep_the_full_tool_set(self):
         names={t['function']['name'] for t in options('Groq','fixture',[{'role':'user','content':'Build an application and test it'}],{})['tools']}
-        self.assertEqual(names,{t['function']['name'] for t in tool_schemas()})
+        self.assertEqual(names,{t['function']['name'] for t in tool_schemas()} - {'security_audit'})
 
     def test_continue_keeps_action_tools_and_does_not_turn_explanations_into_actions(self):
         messages=[{'role':'user','content':'Build a complete website'},
