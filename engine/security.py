@@ -8,6 +8,8 @@ import stat
 import subprocess
 import time
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 _SECRET_NAME = re.compile(r'(?:API_?KEYS?|TOKEN|PASSWORD|SECRET|PRIVATE_KEY|ACCESS_KEY)', re.I)
 _LITERAL = re.compile(r'(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b')
@@ -48,13 +50,44 @@ def sensitive_path(path):
             or 'proc' in path.parts and name in {'environ', 'mem'})
 
 
+# Authorization is derived only from the current human request, never tool/model text.
+_REQUESTED_ROOTS = ContextVar('galam_requested_roots', default=())
+
+
+@contextmanager
+def requested_output_scope(request):
+    roots = []
+    # Only explicit destination clauses grant write scope; merely mentioning a
+    # path to inspect or avoid must not authorize writes there.
+    from engine.action_results import request_intent
+    if request_intent(request)[0] and re.search(r'\b(?:create|make|write|build|implement|generate|edit|modify|update|change|fix|refactor|replace|save|mkdir)\b', request, re.I):
+        pattern = r"\b(?:save(?:d)?(?:\s+it)?(?:\s+(?:under|in|to|at))?|under|inside|into|in|at|to|output\s+to)\s+(`[^`]+`|\"[^\"]+\"|'[^']+'|(?:/|~/)[^\s,;]+)"
+        for match in re.finditer(pattern, request, re.I):
+            clause = request[max(0, request.rfind('.', 0, match.start()) + 1):match.start()]
+            if re.search(r"\b(?:do not|don't|never|except|avoid)\b", clause, re.I):
+                continue
+            verbs = re.findall(r'\b(?:create|make|write|build|implement|generate|edit|modify|update|change|fix|refactor|replace|save|saved|mkdir|read|inspect|search|compare|avoid)\b', clause, re.I)
+            if verbs and verbs[-1].lower() in {'read', 'inspect', 'search', 'compare', 'avoid'}:
+                continue
+            raw = match.group(1).strip('`\"\'').rstrip('.,;')
+            if raw.startswith(('/', '~/')):
+                roots.append(Path(raw).expanduser().resolve())
+    token = _REQUESTED_ROOTS.set(tuple(roots))
+    try:
+        yield
+    finally:
+        _REQUESTED_ROOTS.reset(token)
+
+
 def review_reason(tool, args):
     """Critical actions require review even in ALWAYS-PROCEED mode."""
     if tool in {'write_file', 'replace_file_content', 'make_directory'}:
         from config import AGENT_STATE
         root = Path(AGENT_STATE.get('working_directory') or os.getcwd()).resolve()
-        path = Path(root, str(args.get('path', '.'))).expanduser().resolve()
-        if root != path and root not in path.parents or '.git' in path.parts:
+        raw = Path(str(args.get('path', '.'))).expanduser()
+        path = (raw if raw.is_absolute() else root / raw).resolve()
+        authorized = any(path == scope or scope in path.parents for scope in _REQUESTED_ROOTS.get())
+        if (root != path and root not in path.parents and not authorized) or '.git' in path.parts:
             return 'Change outside the current workspace or inside Git metadata'
     if tool != 'execute_bash':
         return ''

@@ -4,6 +4,14 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Build completion and requested destinations
+
+- Fixed website/app implementations being marked complete after directory setup when the request also mentioned a folder.
+- Scoped explicitly requested output destinations to the current task so Always Proceed avoids redundant ordinary file approvals. Preserved critical review; declined actions can lead to alternatives without repeated identical approval prompts.
+- Fixed filename globs returning model transcripts and excluded runtime/dependency/credential data from ordinary project searches.
+- Recovered provider-buffered, empty length-limited responses with request-local output capacity; regenerated incomplete action arguments instead of splicing broken JSON. Kept provider capacities, prepared-request validation, local manual tuning and explicit spending allowances.
+- Saved explicit incomplete outcomes for endpoint exhaustion and corrected shell read commands misidentified as source writes. See [repair evidence](artifacts/BUILD_COMPLETION_REPAIR.md).
+
 ### Startup routing, context recovery and uncapped continuation
 
 - Fixed startup wording such as “run my web on localhost” bypassing the Command Agent. Added read-only project metadata discovery and late handoff for authorized background commands; the model chooses the actual startup recipe.

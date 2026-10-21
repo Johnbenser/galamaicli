@@ -404,6 +404,22 @@ def _extract_stream_chunk(chunk_json,response=None):
     return content_delta, reasoning_delta, tool_call_deltas, finish_reason
 
 
+def _partial_action(content, calls):
+    """Incomplete action arguments must be regenerated, never spliced as prose."""
+    for opening, closing in (('<tool_call>', '</tool_call>'), ('<invoke', '</invoke>'),
+                             ('<action', '</action>')):
+        if opening in content and closing not in content:
+            return True
+    for call in calls.values():
+        arguments = call.get('function', {}).get('arguments', '')
+        if isinstance(arguments, str):
+            try:
+                json.loads(arguments)
+            except (ValueError, TypeError):
+                return True
+    return False
+
+
 def _is_stream_truncated(finish_reason: str, full_content: str, full_reasoning: str, streamed_tool_calls: dict) -> bool:
     """
     Detects whether an LLM generation stream terminated prematurely due to free endpoint
@@ -774,6 +790,20 @@ def query_subagent(messages: list) -> str:
 
 
 def query_with_fallback(*args, **kwargs):
+    from engine.generation_capacity import output_scope
+    with output_scope():
+        from engine.context_manager import is_user_request
+        from engine.generation_capacity import retain_output
+        messages = kwargs.get('messages', args[0] if args else []) or []
+        human = max((i for i, message in enumerate(messages) if is_user_request(message)), default=-1)
+        for message in messages[human + 1:]:
+            capacity = message.get('_galam_generation_capacity') if message.get('_galam_internal') else None
+            if isinstance(capacity, dict):
+                retain_output(capacity.get('endpoint'), capacity.get('model'), capacity.get('tokens'))
+        return _query_with_fallback(*args, **kwargs)
+
+
+def _query_with_fallback(*args, **kwargs):
     from engine.command_agent import request_profile
     profile = request_profile()
     visited = set(kwargs.pop('_visited_endpoints', ()))
@@ -1080,7 +1110,8 @@ def query_with_fallback(*args, **kwargs):
                 AGENT_STATE["is_streaming"] = False
 
                 if (not full_content and not full_reasoning and not streamed_tool_calls
-                        and not reasoning_stream.in_reasoning and not reasoning_stream.pending):
+                        and not reasoning_stream.in_reasoning and not reasoning_stream.pending
+                        and last_finish_reason not in ("length", "max_tokens", "length_limit")):
                     # A local stream can close before sending any tokens. Retry once
                     # without streaming before giving up on this user request.
                     if active_ep == "Local Endpoint" and not AGENT_STATE.get("abort", False):
@@ -1115,8 +1146,29 @@ def query_with_fallback(*args, **kwargs):
             # seamlessly continues all along without aborting or stalling.
             cont_idx = 0
             previous_continuations = set()
+            partial_action = False
+            buffered_action = False
             while not AGENT_STATE.get("abort", False):
                 if not _is_stream_truncated(last_finish_reason, full_content, full_reasoning, streamed_tool_calls):
+                    break
+                native_pending = streamed_tool_calls
+                if not native_pending and isinstance(resp_json, dict):
+                    choices = resp_json.get('choices') or []
+                    message = choices[0].get('message', {}) if choices else resp_json.get('message', {})
+                    native_pending = dict(enumerate(message.get('tool_calls') or [])) if isinstance(message, dict) else {}
+                from engine.context_manager import contextual_action
+                if contextual_action(raw_messages) and _partial_action(full_content, native_pending):
+                    from engine.generation_capacity import grow_output
+                    grow_output(active_ep, model_name, CONFIG, payload)
+                    partial_action = True
+                    break
+                from engine.generation_capacity import grow_output
+                capacity_grown = (last_finish_reason in ('length', 'max_tokens', 'length_limit')
+                                  and contextual_action(raw_messages)
+                                  and grow_output(active_ep, model_name, CONFIG, payload))
+                if (not capacity_grown and payload.get('tools') and not native_pending and not full_content.strip()
+                        and last_finish_reason in ('length', 'max_tokens', 'length_limit')):
+                    partial_action = buffered_action = True
                     break
                 cont_idx += 1
                 thought_ui.show_spinner(f"Output truncated by provider · Continuing ({cont_idx})...")
@@ -1249,6 +1301,9 @@ def query_with_fallback(*args, **kwargs):
                 after_tools = json.dumps(streamed_tool_calls,sort_keys=True)
                 delta = (full_content[before_content:], full_reasoning[before_reasoning:],
                          after_tools if after_tools != before_tools else '')
+                if delta == ('','','') and capacity_grown and payload.get('tools') and last_finish_reason in ('length', 'max_tokens', 'length_limit'):
+                    partial_action = buffered_action = True
+                    break
                 if delta == ('','','') or delta in previous_continuations:
                     # An unchanged provider response needs another task approach,
                     # not another identical continuation. This is not a step cap.
@@ -1285,6 +1340,8 @@ def query_with_fallback(*args, **kwargs):
                     })
 
             json_tools = _detect_and_synthesize_tool_calls("", resp_json) if resp_json else []
+            if partial_action:
+                json_tools = [call for call in json_tools if not _partial_action('', {0: call})]
             if last_finish_reason in ("tool_calls", "function_call") and not final_streamed_tools and not json_tools:
                 # Some providers finish a stream with tool_calls but omit the
                 # call/argument deltas. No action has run: retrieve one complete
@@ -1307,7 +1364,7 @@ def query_with_fallback(*args, **kwargs):
                 if retry_reason:
                     full_reasoning = (full_reasoning + "\n\n" + retry_reason).strip()
                 json_tools = _detect_and_synthesize_tool_calls("", resp_json)
-            if not full_content.strip() and not full_reasoning.strip() and not final_streamed_tools and not json_tools:
+            if not partial_action and not full_content.strip() and not full_reasoning.strip() and not final_streamed_tools and not json_tools:
                 continue
 
             # Separate untagged internal monologue from user-facing text
@@ -1322,13 +1379,13 @@ def query_with_fallback(*args, **kwargs):
 
             # If full_content is empty (because the entire stream was classified as reasoning)
             # and no tool call is detected, ensure the AI is never silent:
-            incomplete_response=not full_content.strip() and not final_streamed_tools and not json_tools
+            incomplete_response=partial_action or last_finish_reason in ('length', 'max_tokens', 'length_limit') or (not full_content.strip() and not final_streamed_tools and not json_tools)
             if incomplete_response:
                 full_content = "The model did not provide a final answer or a complete action."
 
             # Prioritize natively streamed tools, then content parsing, then confident reasoning
             tool_calls = final_streamed_tools or json_tools
-            if not tool_calls:
+            if not tool_calls and not partial_action:
                 tool_calls = _detect_and_synthesize_tool_calls(full_content, resp_json)
 
             # Check if this query turn follows a successful tool observation
@@ -1392,6 +1449,12 @@ def query_with_fallback(*args, **kwargs):
                 raw={"model": model_name}
             )
             response_obj.incomplete=incomplete_response
+            response_obj.action_truncated=partial_action
+            response_obj.buffered_action=buffered_action
+            from engine.context_manager import model_limits
+            response_obj.generation_capacity = {'endpoint':active_ep, 'model':model_name,
+                                                'tokens':model_limits(active_ep, model_name, CONFIG)[1]}
+
             response_obj.response_reasoning=retained_reasoning
             response_obj.response_origin=[active_ep,model_name,url]
             return response_obj, model_name

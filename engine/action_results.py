@@ -61,9 +61,9 @@ def request_intent(text):
         return False, False
     action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|launch|restart|serve|open|inspect|read|list|search|audit)\b|go to|bring\s+up", cleaned, re.I))
     mutation = bool(re.search(r"\b(?:edit|modify|update|change|fix|refactor|rewrite)\b", cleaned, re.I)) or requires_content(cleaned)
-    code = bool(re.search(r"\b(?:code|file|script|app|function|class|page|site|css|html|py|js|json)\b|\.(?:py|jsx?|tsx?|json|css|html)\b", cleaned, re.I))
+    code = bool(re.search(r"\b(?:code|file|script|app|application|function|class|page|site|website|webpage|component|program|css|html|py|js|json)\b|\.(?:py|jsx?|tsx?|json|css|html)\b", cleaned, re.I))
     navigation = bool(re.search(r"\b(?:directory|folder|mode|model|endpoint|settings|working directory)\b", cleaned, re.I))
-    return action, mutation and (code or not navigation)
+    return action, mutation and (requires_content(cleaned) or code or not navigation)
 
 
 def requires_content(text):

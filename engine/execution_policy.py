@@ -6,7 +6,7 @@ MODES = ("REVIEW", "AUTO", "ALWAYS-PROCEED")
 
 
 def normalize_mode(value):
-    mode = str(value or "REVIEW").upper().replace("_", "-")
+    mode = str(value or "REVIEW").strip().upper().replace("_", "-").replace(" ", "-")
     return mode if mode in MODES else "REVIEW"
 
 

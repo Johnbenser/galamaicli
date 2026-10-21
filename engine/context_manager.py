@@ -44,6 +44,12 @@ def model_limits(endpoint, model, config):
         window=min(window,positive(info.get('context_window'),window))
     output = min(positive(config.get("max_tokens"), 4096), positive(info.get("max_output_tokens"), window),
                  max(512, window // 4))
+    from engine.generation_capacity import output_override
+    adaptive = output_override(endpoint, model)
+    if adaptive and config.get('adaptive_action_output', True) is not False and not (
+            local and (config.get('local_tuning') or {}).get('mode') == 'manual'):
+        output = min(adaptive, positive(info.get('max_output_tokens'), window), window - 128)
+
     margin = max(128, window // 20)
     return window, output, margin
 

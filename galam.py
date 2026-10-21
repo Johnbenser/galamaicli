@@ -599,6 +599,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
         print(receipt)
         return
     with ExitStack() as delegation_stack:
+        from engine.security import requested_output_scope
+        delegation_stack.enter_context(requested_output_scope(request))
         if CONFIG.get('command_agent', True) and should_delegate(request):
             agent = delegation_stack.enter_context(CommandAgent(messages, conversation_id, CONFIG, checkpoint))
             return _run_agent_loop(agent.messages, conversation_id, max_steps, agent.flush, delegation_stack)
@@ -611,6 +613,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
         max_steps = int(CONFIG.get("max_iterations", 25))
     step = 0
     executed_commands = set()
+    declined_commands = set()
     workspace_revision = 0
     pending_checks = []
     action_events = []
@@ -733,6 +736,9 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             )
             sys.stdout.write("\n\033[1;31m[!] All models under active endpoint failed.\033[0m\n")
             sys.stdout.flush()
+            evidence = ('\nLast observed result: ' + _tool_completion_summary(last_tool_result)) if last_tool_result else ''
+            finish_receipt('Task incomplete: no usable response was returned by the available endpoint models.' + evidence +
+                           '\nActual progress is retained; resume this conversation to continue.')
             break
         if isinstance(response_msg, str) and response_msg in ("FAILED", "EXHAUSTED", "CANCELLED"):
             if workflow.stop_reason:
@@ -742,6 +748,10 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 tool_name, output, succeeded, _ = last_tool_result
                 sys.stdout.write(f"  {'Success' if succeeded else 'Incomplete'}: {tool_name}\n  Summary: {output[:1000]}\n\n")
                 sys.stdout.flush()
+            if response_msg == 'FAILED':
+                evidence = ('\nLast observed result: ' + _tool_completion_summary(last_tool_result)) if last_tool_result else ''
+                finish_receipt('Task incomplete: the selected endpoint did not return a usable response.' + evidence +
+                               '\nActual progress is retained; resume this conversation to continue.')
             break
 
         assistant_content = response_msg.content if response_msg else ""
@@ -800,6 +810,19 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     sys.stdout.flush()
                     break
                 missing = contract.missing()
+                if getattr(response_msg, 'generation_capacity', None):
+                    feedback['_galam_generation_capacity'] = response_msg.generation_capacity
+                if getattr(response_msg, 'buffered_action', False):
+                    feedback['_galam_force_text_tools'] = True
+                    feedback['content'] += ("\nThe provider buffered an oversized native action without returning arguments. "
+                        "Use the text tool contract for this task. Emit one compact complete call now; "
+                        "create a working first file, then extend it with focused edits. Do not generate the whole project in one call.")
+                if getattr(response_msg, 'action_truncated', False):
+                    feedback['content'] += ("\nThe action arguments exceeded this response's output capacity. "
+                        "Regenerate one smaller, complete valid tool call; do not continue the broken JSON. "
+                        "Build a working first file, then use focused edits and separate files to finish every requirement.")
+                if code_change_requested and not code_change_completed:
+                    missing.append("requested implementation: no successful nonempty file change observed; directory creation and inspections are setup only. Write a working first file now, then extend it with focused edits to fulfill the remaining requirements")
                 if server_pending:
                     missing.append("HTTP-verified server startup; successful inspections are not a running server")
                 if missing:
@@ -894,8 +917,8 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 if valid_command:
                     valid_command, invalid_reason = preflight_shell_command(proposed)
                 if valid_command and code_change_requested and not is_verification and re.search(
-                        r"\b(?:touch\s+|sed\s+-i|perl\s+-pi|python(?:3|3\.\d+)?\s+-c|tee\s+|cat\s+>|printf\s+.*>|echo\s+.*>)",
-                        proposed, re.IGNORECASE):
+                        r"\b(?:touch\s+|sed\s+-i|perl\s+-pi|python(?:3|3\.\d+)?\s+-c|tee\s+|cat\s+>|(?:printf|echo)\s+[^;&|\n]*(?:1>|(?<![0-9])>))",
+                        re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", ' DATA ', proposed), re.IGNORECASE):
                     valid_command = False
                     invalid_reason = "Use write_file(path, content) with the complete implementation for new or empty files; inspect and use replace_file_content for existing code. Creating an empty file does not implement the request"
                 if not valid_command:
@@ -962,6 +985,11 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                         continue
 
             call_signature = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+            if call_signature in declined_commands:
+                rejected_in_this_step = True
+                messages.append({"role": "user", "_galam_internal": True, "content":
+                                 "This exact action was already declined for this request. Choose an alternative or explain the blocker; do not request the same approval again."})
+                continue
             execution_key = (call_signature, workspace_revision)
             if execution_key in executed_commands and tool_name not in ('view_file', 'search_files', 'read_action_output', 'execute_bash'):
                 continue
@@ -984,8 +1012,10 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 elif choice not in ("y", "yes"):
                     sys.stdout.write("\033[38;5;244m[-] Tool execution declined.\033[0m\n\n")
                     sys.stdout.flush()
-                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
-                    return
+                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach without repeating this declined action."})
+                    declined_commands.add(call_signature)
+                    rejected_in_this_step = True
+                    continue
             else:
                 choice = request_tool_review(cmd_preview, f"Approval Required: {tool_name}")
                 if choice in ("cancel", "c", "/cancel"):
@@ -996,8 +1026,10 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 elif choice not in ("y", "yes"):
                     sys.stdout.write("\033[38;5;244m[-] Tool execution declined.\033[0m\n\n")
                     sys.stdout.flush()
-                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach."})
-                    return
+                    messages.append({"role": "user", "_galam_internal": True, "content": f"I declined to execute `{tool_name}` with args: {args}. Propose another approach without repeating this declined action."})
+                    declined_commands.add(call_signature)
+                    rejected_in_this_step = True
+                    continue
             step_bullet = format_action_step(tool_name, args)
             sys.stdout.write(f"{step_bullet}\n")
             sys.stdout.flush()

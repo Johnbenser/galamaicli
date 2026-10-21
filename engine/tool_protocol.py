@@ -41,6 +41,10 @@ def _key(endpoint, model, config):
 def options(endpoint, model, messages, config):
     from storage.conversations import scoped_messages
     messages = scoped_messages(messages)
+    from engine.context_manager import is_user_request
+    human = max((i for i, message in enumerate(messages) if is_user_request(message)), default=-1)
+    if any(message.get('_galam_force_text_tools') for message in messages[human + 1:]):
+        return {}
     # Providers with different tool wire formats keep Galam's text protocol.
     from storage.endpoints import ENDPOINT_REGISTRY
     custom=ENDPOINT_REGISTRY.get(endpoint,{}).get('models',{}).get(model,{}).get('custom_connection')
