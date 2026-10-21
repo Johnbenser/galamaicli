@@ -576,13 +576,15 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
     action_events = []
     last_tool_result = None
     completed = False
-    current_request = next((str(m.get("content", "")) for m in reversed(messages)
-                            if m.get("role") == "user"), "")
+    from engine.context_manager import task_request
+    current_request = task_request(messages)
     action_requested, code_change_requested = request_intent(current_request)
     from engine.context_manager import contextual_action
     action_requested = action_requested or contextual_action(messages)
     repair = ActionRepair()
     contract = TaskContract(current_request, session_directory())
+    from engine.server_commands import server_start_requested
+    requires_server=server_start_requested(current_request)
     for message in reversed(messages):
         if message.get("role") == "user":
             message["_galam_tool_mode"] = "auto" if action_requested else "none"
@@ -709,7 +711,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 break
             read_receipt = (last_tool_result and last_tool_result[0] == "view_file"
                             and last_tool_result[2] and not code_change_requested)
+            server_pending=requires_server and not any(event["tool"]=="execute_bash" and event["result"].success and event["result"].is_background for event in action_events)
             unfinished = action_requested and (
+                server_pending or getattr(response_msg,"incomplete",False) or
                 not executed_commands or contract.missing() or code_change_requested and not code_change_completed
                 or last_tool_result and not last_tool_result[2]
                 or detect_action_intent(assistant_content)[0] and not read_receipt)
@@ -718,11 +722,14 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                     (workspace_revision, session_directory(), tuple(sorted(inspected_files.items())), tuple(contract.missing())))
                 if feedback is None:
                     message = "Incomplete: the model did not return a complete tool call after protocol repair. No further action was executed."
+                    AGENT_STATE["task_outcome"]="incomplete"
                     messages.append({"role": "assistant", "content": message})
                     sys.stdout.write("\n  " + message + "\n\n")
                     sys.stdout.flush()
                     break
                 missing = contract.missing()
+                if server_pending:
+                    missing.append("HTTP-verified server startup; successful inspections are not a running server")
                 if missing:
                     feedback["content"] += "\nVerified requirements still missing: " + "; ".join(missing)
                 progress("Preparing a structured action call")
@@ -733,6 +740,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 clean_text = _tool_completion_summary(last_tool_result)
                 if messages and messages[-1].get("role") == "assistant":
                     messages[-1]["content"] = clean_text
+            if getattr(response_msg,"incomplete",False):
+                AGENT_STATE["task_outcome"]="incomplete"
             if clean_text:
                 from ui.chat_transcript import assistant_text
                 sys.stdout.write("\r\033[2K"+assistant_text(clean_text,success=bool(is_post_tool_turn and last_tool_result and last_tool_result[2])))

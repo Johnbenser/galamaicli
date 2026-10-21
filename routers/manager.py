@@ -156,6 +156,13 @@ def _response_json(response,is_urllib=False):
     if isinstance(data,dict):
         from engine.api_protocols import remember_reasoning,response_chunk
         remember_reasoning(response,data)
+        choices=data.get('choices') or []
+        candidates=data.get('candidates') or []
+        finish=(choices[0].get('finish_reason') if choices and isinstance(choices[0],dict) else
+                candidates[0].get('finishReason') if candidates and isinstance(candidates[0],dict) else None)
+        if data.get('done') and isinstance(data.get('message'),dict):
+            finish='length' if data.get('done_reason')=='length' else 'stop'
+        if finish:response._galam_finish_reason=finish
         if data.get('object')=='response' and data.get('status') in ('completed','incomplete','failed'):
             try:response._galam_finish_reason=response_chunk({'type':'response.'+data['status'],'response':data},response)[3]
             except ValueError as error:raise ProviderStreamError(str(error)) from None
@@ -399,6 +406,11 @@ def _is_stream_truncated(finish_reason: str, full_content: str, full_reasoning: 
     """
     if finish_reason and finish_reason.lower() in ("length", "max_tokens", "length_limit"):
         return True
+
+    # A normal provider stop is not evidence of truncation, even if only
+    # reasoning was returned. The action loop owns bounded protocol repair.
+    if str(finish_reason).lower() in ("stop","end_turn","completed","complete","tool_calls","function_call"):
+        return False
 
     # 1. Unclosed thinking tags (monologue cut off mid-thought)
     if "<think>" in full_content and "</think>" not in full_content:
@@ -1290,7 +1302,8 @@ def query_with_fallback(*args, **kwargs):
 
             # If full_content is empty (because the entire stream was classified as reasoning)
             # and no tool call is detected, ensure the AI is never silent:
-            if not full_content.strip() and not final_streamed_tools and not json_tools:
+            incomplete_response=not full_content.strip() and not final_streamed_tools and not json_tools
+            if incomplete_response:
                 full_content = "The model did not provide a final answer or a complete action."
 
             # Prioritize natively streamed tools, then content parsing, then confident reasoning
@@ -1357,6 +1370,7 @@ def query_with_fallback(*args, **kwargs):
                 streamed=True,
                 raw={"model": model_name}
             )
+            response_obj.incomplete=incomplete_response
             response_obj.response_reasoning=retained_reasoning
             response_obj.response_origin=[active_ep,model_name,url]
             return response_obj, model_name

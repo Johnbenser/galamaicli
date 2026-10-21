@@ -450,11 +450,12 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 277 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 286 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
 | [Changelog](CHANGELOG.md) | Consolidated improvements and bug fixes |
+| [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |
 | [Pipeline upgrade](artifacts/PIPELINE_UPGRADE_NOTES.md) | Parsing, validation, action results and recovery |
 | [Token optimization](artifacts/TOKEN_OPTIMIZATION_REPORT.md) | Context and request-budget work |
 | [Conversation scope](artifacts/CONVERSATION_CONTEXT.md) | History ownership and request context |

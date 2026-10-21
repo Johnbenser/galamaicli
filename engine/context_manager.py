@@ -66,6 +66,18 @@ def latest_request(messages):
     return next((str(m.get("content", "")) for m in reversed(messages) if is_user_request(m)), "")
 
 
+def task_request(messages):
+    """Resolve short resume/continue prompts to this conversation's real task."""
+    from storage.conversations import scoped_messages
+    source=scoped_messages(messages)
+    for message in reversed(source):
+        if not is_user_request(message):continue
+        text=str(message.get('content',''))
+        if not re.fullmatch(r'\s*(?:continue|go ahead|do it|yes|proceed|fix that|try again)[.!]?\s*',text,re.I):
+            return text
+    return latest_request(source)
+
+
 def contextual_action(messages):
     """A short continuation inherits intent only from this conversation."""
     from storage.conversations import scoped_messages

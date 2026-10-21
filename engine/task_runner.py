@@ -14,6 +14,7 @@ import urllib.parse
 import socket
 import glob
 import difflib
+import uuid
 from typing import List, Dict, Tuple, Any, Optional
 
 from tools import filesystem
@@ -23,22 +24,6 @@ from engine.action_results import ActionResult, as_result
 from engine.result_store import store_result, read_action_output
 from engine.cancellation import run_process as cancellable_run
 from engine.tool_registry import validate_arguments
-
-SERVER_RUNNERS = [
-    r"(?:python\d?|python3?)\s+(?:[\w\./\-]+/)?(?:server\.py|app\.py|main\.py)",
-    r"python\d?\s+-m\s+http\.server(?:\s+\d+)?",
-    r"(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:dev|start|serve|preview)",
-    r"(?:npx\s+)?(?:vite|next|astro|remix)(?:\s+dev)?",
-    r"node\s+(?:[\w\./\-]+/)?(?:server|index|app|main)\.(?:js|mjs|cjs)",
-    r"(?:uvicorn|gunicorn|fastapi)\s+[\w\.:]+",
-    r"flask\s+run",
-    r"(?:npx\s+)?(?:live-server|http-server)(?:\s+\d+)?"
-]
-
-EXCLUDED_COMMANDS = (
-    "grep", "ps", "kill", "pkill", "cat", "echo",
-    "head", "tail", "which", "find", "pgrep", "sleep"
-)
 
 class TaskManager:
     def __init__(self):
@@ -288,53 +273,13 @@ class TaskManager:
             return active_list
 
     def is_server_command(self, cmd: str) -> bool:
-        clean = cmd.strip()
-        lines = [l.strip() for l in clean.splitlines() if l.strip()]
-        for line in lines:
-            first_word = line.split()[0].lower() if line.split() else ""
-            if first_word in EXCLUDED_COMMANDS:
-                continue
-            for pat in SERVER_RUNNERS:
-                if re.search(pat, line, re.IGNORECASE):
-                    return True
-            if line.endswith("&") and first_word not in EXCLUDED_COMMANDS:
-                return True
-        return False
+        from engine.server_commands import server_invocation
+        return server_invocation(cmd) is not None
 
     def extract_server_target(self, cmd: str) -> Tuple[str, str]:
-        """Extracts the display name (e.g. python3 -m http.server 8080) and port."""
-        port = "5500"
-        port_match = re.search(r'(?:--port|-p|\bport\s*[:=]?)\s*(\d{3,5})', cmd, re.IGNORECASE)
-        if port_match:
-            port = port_match.group(1)
-        else:
-            num_match = re.search(r'\b([1-9]\d{3,4})\b', cmd)
-            if num_match:
-                port = num_match.group(1)
-            elif "8080" in cmd:
-                port = "8080"
-            elif "3000" in cmd:
-                port = "3000"
-            elif "5500" in cmd:
-                port = "5500"
-
-        # Search for the actual server runner sub-command match
-        display_cmd = ""
-        for pat in SERVER_RUNNERS:
-            m = re.search(pat, cmd, re.IGNORECASE)
-            if m:
-                matched_str = m.group(0).strip()
-                p_after = re.search(r'\b\d{3,5}\b', cmd[m.end():m.end()+15])
-                if p_after and port == "5500":
-                    port = p_after.group(0)
-                display_cmd = matched_str
-                break
-
-        if not display_cmd:
-            lines = [l.strip() for l in cmd.strip().splitlines() if l.strip()]
-            display_cmd = lines[-1] if lines else "server"
-
-        return display_cmd, port
+        from engine.server_commands import server_invocation,configured_port
+        found=server_invocation(cmd)
+        return (' '.join(found[1]) if found else 'server'),configured_port(cmd) or '5500'
 
     def get_task_pill_tokens(self) -> list:
         tasks = self.get_active_tasks()
@@ -874,20 +819,14 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
                         if suggestions else "")
                 return f"[Error: Working directory does not exist: {cand_p}.{hint}]", False
 
-        # npm scripts may specify their own port; use it for the health check.
-        if server_cwd and re.search(r'\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|start|serve|preview)\b', clean_cmd):
-            try:
-                with open(os.path.join(server_cwd, "package.json"), encoding="utf-8") as package_file:
-                    scripts = json.load(package_file).get("scripts", {})
-                script_name = re.search(r'\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(dev|start|serve|preview)\b', clean_cmd).group(1)
-                script = str(scripts.get(script_name, ""))
-                declared_port = re.search(r'(?:--port(?:=|\s+)|\bPORT=)(\d{3,5})', script)
-                if declared_port:
-                    port = declared_port.group(1)
-                elif "vite" in script.lower() and port == "5500":
-                    port = "5173"
-            except (OSError, ValueError, TypeError):
-                pass
+        # Resolve nested package scripts and PORT defaults from the actual runner.
+        # Explicit command-line ports retain precedence over package defaults.
+        from engine.server_commands import configured_port
+        try:
+            with open(os.path.join(server_cwd,'package.json'),encoding='utf-8') as package_file:
+                scripts=json.load(package_file).get('scripts',{})
+        except (OSError,ValueError,TypeError):scripts={}
+        port=configured_port(clean_cmd,scripts,sub_env) or port
 
         # Python entrypoints often declare a default port inside argparse or app.run.
         if port == "5500" and server_cwd:
@@ -922,7 +861,7 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
         # Redirect background server stdout and stderr to persistent task log to avoid Linux 64KB pipe buffer deadlock and SIGPIPE
         server_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs", "tasks")
         os.makedirs(server_log_dir, exist_ok=True)
-        server_log_file = os.path.abspath(os.path.join(server_log_dir, f"server_{port}.log"))
+        server_log_file = os.path.abspath(os.path.join(server_log_dir, f"server_{port}_{uuid.uuid4().hex[:10]}.log"))
         log_out = open(server_log_file, "a", encoding="utf-8", errors="replace")
 
         try:
@@ -1020,6 +959,8 @@ def _execute_shell_action_legacy(cmd: str) -> Tuple[str, bool]:
             )
         except Exception as e:
             return f"[Failed to start server: {e}]", False
+        finally:
+            log_out.close()
     else:
         is_curl_cmd = clean_cmd.strip().startswith("curl ")
 

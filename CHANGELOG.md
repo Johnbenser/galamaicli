@@ -29,6 +29,11 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Improved
 
+- Server detection checks actual executable positions; reading Vite configs or printing startup instructions stays in the foreground.
+- Resolve launch ports through nested package scripts and environment defaults, preserving explicit port overrides. Each launch gets its own log.
+- Normal provider stops no longer cause speculative repeated reasoning continuations; explicit token-limit cutoffs still continue.
+- Server-start tasks require verified startup evidence; incomplete replies cannot turn successful inspections into a false completion. Resumed short continuations retain the original task.
+
 - Completion footers show duration, a frozen local AM/PM clock and only Total Token; approximate totals use `~` and unavailable measurements remain explicit.
 - Fixed false zero-token totals when the optional planning graph runs inference in worker contexts; main and side tasks retain separate ledgers.
 - Preserve authoritative provider totals, total-only usage and split input/output frames without requiring extra usage requests or adding prompt text.
