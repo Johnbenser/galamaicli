@@ -143,5 +143,10 @@ def server_start_requested(request):
     # Conservative adjacent-verb correction, independent of a user's spelling/path.
     text=re.sub(r'\b(\w+)(\s+(?:(?:my|the|this|our|a|dev|development)\s+){0,3}(?:server|service)\b)',normalize,str(request),flags=re.I)
     if not request_intent(text)[0]:return False
-    text=re.sub(r"\b(?:do not|don't|never)\s+(?:start|run|launch|restart)\b[^.;\n]*",'',text,flags=re.I)
-    return bool(re.search(r'\b(?:start|run|launch|restart)\b[^.\n]{0,100}\b(?:server|service)\b|\bserve\s+(?:my|the|this)\s+(?:app|site|project)\b',text,re.I))
+    text=re.sub(r"\b(?:do not|don't|never)\s+(?:start|run|launch|restart|serve|bring\s+up)\b[^.;\n]*",'',text,flags=re.I)
+    if re.search(r'\b(?:run|execute)\s+(?:the\s+)?(?:tests?|lint|checks?)\b', text, re.I):
+        return False
+    return bool(re.search(
+        r'\b(?:start|run|launch|restart|bring\s+up)\b[^\n]{0,140}\b(?:server|service|web|website|site|app|preview)\b|'
+        r'\b(?:start|run|launch|restart)\b[^\n]{0,140}\blocalhost\b|'
+        r'\bserve\s+(?:my|the|this)\s+(?:app|site|project)\b',text,re.I))

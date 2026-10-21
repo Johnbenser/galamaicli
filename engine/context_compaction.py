@@ -1,6 +1,7 @@
 """Recoverable active-task compaction; never rewrite saved conversations or user requests."""
 import copy
 import json
+import re
 
 from engine.result_store import archive_context, compact_text
 
@@ -55,7 +56,7 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
                     if not isinstance(arguments, dict):
                         continue
                     for key, value in arguments.items():
-                        if isinstance(value, str) and len(value) > limit:
+                        if key not in ('command','path') and isinstance(value, str) and len(value) > limit:
                             arguments[key] = compact_text(value, limit)
                     function['arguments'] = json.dumps(arguments, ensure_ascii=False)
                 row['tool_calls'] = reduced
@@ -111,4 +112,28 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
         mandatory.add(first)
         changed.update(removed)
         # If the marker tips a very tight budget over, the caller reports a real limit.
+    # Tight windows may not fit several latest results plus protocol overhead.
+    # Keep recoverable previews, while preserving native call/result grouping.
+    for limit in (180, 80):
+        for i in sorted(mandatory, key=lambda i: estimate(rows[i]), reverse=True):
+            if cost() <= available:
+                break
+            if is_request(originals[i]) or rows[i].get('tool_calls'):
+                continue
+            text = str(rows[i].get('content',''))
+            if text.startswith('[Workflow recovery]'):
+                rows[i]['content']='[Workflow recovery] Use retained evidence; choose another useful action.'
+            elif text.startswith('[Earlier task exchanges archived'):
+                reference=re.search(r'action_id="([a-f0-9]{32})"',text)
+                if reference:
+                    rows[i]['content']=f'[Earlier task archived: read_action_output(action_id="{reference[1]}"). Original user requirements still apply.]'
+            elif len(text)>limit+200:
+                original=originals[i]
+                info=original.get('_galam_action',{})
+                reference=info.get('source_id') or info.get('id') or archive_context(str(original.get('content','')))
+                errors=[line for line in str(original.get('content','')).splitlines()
+                        if any(word in line for word in ('Error:', 'SyntaxError', 'ModuleNotFoundError','[Exit status'))]
+                excerpt=compact_text('\n'.join(errors) if errors else str(original.get('content','')),limit)
+                rows[i]['content']=excerpt+f'\n[Partial result; original: read_action_output(action_id="{reference}"). Retrieve exact source before edits.]'
+            changed.add(i)
     return rows, mandatory, len(changed)

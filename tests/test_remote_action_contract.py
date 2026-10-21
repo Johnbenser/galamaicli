@@ -125,7 +125,7 @@ class RemoteActionContractTests(unittest.TestCase):
         self.assertIs(post.call_args_list[0].kwargs['json'], post.call_args_list[1].kwargs['json'])
         sleep.assert_called_once_with(2.0)
         limited.close.assert_called_once()
-        self.assertIsNone(manager._rate_limit_delay(Mock(status_code=429, headers={'Retry-After': '120'})))
+        self.assertEqual(manager._rate_limit_delay(Mock(status_code=429, headers={'Retry-After': '120'})),120)
 
 
 if __name__ == '__main__':

@@ -4,6 +4,16 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Startup routing, context recovery and uncapped continuation
+
+- Fixed startup wording such as “run my web on localhost” bypassing the Command Agent. Added read-only project metadata discovery and late handoff for authorized background commands; the model chooses the actual startup recipe.
+- Removed default total step/request/token/time caps and count-based repetition/protocol termination. Checkpoint cadence, explicit user spending caps, cancellation, reviews and provider/operation constraints remain. Added `/budget ... off` and migration of older generated caps/global context overrides.
+- Fixed ordinary multi-tool context overflow by coalescing generated guidance, separating generated worker instructions from user rules and fitting recoverable result previews. Exact command/path arguments remain intact. Complete prepared requests include serialization/schema overhead in their capacity check.
+- Added local, conditional conversation recall with source references, inherited subjects for follow-ups and a distinction between proposals and observed findings/commands. No extra model or embedding calls. Exact stored tool evidence no longer expires by age/count.
+- Fixed quoted HTML being rejected as a placeholder, curl timeout values becoming URLs, and parser exceptions reporting success. Honor provider Retry-After values above the old 55-second threshold. Output can continue past the old three-continuation cap, with duplicate-response detection.
+- Saved readable query-failure outcomes and added deterministic local handling of the current conversation-ID question. Preserved settings appearance, dock layout, queue, `/btw`, review/edit safeguards and combined token accounting.
+- Added real Vite/React asset, Python, Flask, Node, custom Make and build-then-serve regressions. A selected-model live pilot successfully served both a build/Python project and a Vite project; results and limitations are recorded separately from scripted tests.
+
 ### Same-model Command Agent
 
 - Startup requests enter a focused Command Agent using the selected endpoint/model. The parent waits; execution stays in the existing reviewed action loop. Unrelated chat turns are omitted while existing user constraints and current-task evidence remain.

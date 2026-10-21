@@ -46,7 +46,9 @@ class LaunchEvidenceTests(fixtures.Workspace):
             if reason:
                 break
             self.flow.observe('view_file', {'path': f'notes{n}.txt'}, ActionResult(f'unrelated new output {n}'), str(self.root))
-        self.assertTrue(reason, 'Novel but unrelated reads must not indefinitely renew a startup task')
+        self.assertFalse(reason, 'Repetition guides recovery instead of ending the task by count')
+        self.assertFalse(self.flow.new_in_round)
+        self.assertIsNotNone(self.flow.recovery())
 
     def test_recovery_uses_the_retained_command_and_next_milestone(self):
         self.package()

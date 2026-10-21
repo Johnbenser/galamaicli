@@ -157,9 +157,9 @@ DEFAULT_VALUES = {
     "temperature": 0.7,
     "max_tokens": 4096,
     "max_iterations": 25,
-    "task_request_limit": 128,
-    "task_token_limit": 120000,
-    "task_time_limit_seconds": 1800,
+    "task_request_limit": None,
+    "task_token_limit": None,
+    "task_time_limit_seconds": None,
     "server_startup_timeout": 30,
     "server_build_timeout": 180,
     "command_agent": True,
@@ -204,6 +204,17 @@ def load_config():
         cfg["active_model"] = cfg["model"]
     if "fallback_policy" not in cfg:
         cfg["fallback_policy"] = "ask"
+
+    # Earlier versions persisted generated defaults as hard task/context caps.
+    # Only /budget's explicitly selected caps survive that one-time migration.
+    if cfg.get('continuation_policy_version', 0) < 2:
+        explicit = cfg.get('explicit_task_limits', [])
+        for key in ('task_request_limit', 'task_token_limit', 'task_time_limit_seconds'):
+            if key not in explicit:
+                cfg[key] = None
+        if not cfg.get('context_limit_explicit'):
+            cfg.pop('context_window', None)
+        cfg['continuation_policy_version'] = 2
 
     # If active_endpoint is set to an endpoint without credentials, and OpenRouter has credentials, auto-switch default
     act_ep = cfg.get("active_endpoint", "")

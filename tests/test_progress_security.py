@@ -51,15 +51,17 @@ class ProgressLoopTests(fixtures.Workspace):
         self.assertEqual((self.root / 'result.txt').read_text(), 'Implemented correction')
         self.assertEqual(messages[0][KEY]['status'], 'completed')
 
-    def test_repeated_reads_recover_then_checkpoint_without_runaway(self):
+    def test_repeated_reads_recover_and_continue_without_a_step_cap(self):
         (self.root / 'a.txt').write_text('Known fact')
         reply = self.response('view_file', {'path': 'a.txt'})
-        messages, model, execute = self.run_loop([reply] * 12)
-        self.assertLessEqual(model.call_count, 5)
-        self.assertEqual(execute.call_count, 1)
+        messages, model, execute = self.run_loop([reply] * 12 + [
+            self.response('write_file', {'path':'fixed.txt','content':'Resolved with another approach'}),
+            self.response(text='Implemented the correction.')])
+        self.assertGreater(model.call_count, 12)
+        self.assertEqual(execute.call_count, 2)
         self.assertTrue(any('[Workflow recovery]' in m.get('content', '') for m in messages))
-        self.assertIn('progress is saved', messages[-1]['content'])
-        self.assertEqual(messages[-1]['_galam_response_stats']['status'], 'incomplete')
+        self.assertEqual((self.root/'fixed.txt').read_text(),'Resolved with another approach')
+        self.assertEqual(messages[-1]['_galam_response_stats']['status'], 'completed')
 
     def test_recovery_can_proceed_to_a_different_solution(self):
         (self.root / 'a.txt').write_text('Known fact')
@@ -84,6 +86,26 @@ class ProgressLoopTests(fixtures.Workspace):
         messages, model, _ = self.run_loop(model_reply, messages, task_request_limit=3)
         self.assertEqual(model.call_count, 0)
         self.assertEqual(messages[-2][KEY]['tokens'], 900)
+
+    def test_real_loop_crosses_old_request_and_token_caps_then_completes(self):
+        (self.root/'source.txt').write_text('Verified unchanged source')
+        calls=0
+        def reply(history):
+            nonlocal calls
+            calls+=1
+            usage.begin_request('fixture','model',{'messages':[]}).update(total_tokens=2000)
+            if calls<=132:
+                return self.response('view_file',{'path':'source.txt'})
+            if calls==133:
+                return self.response('write_file',{'path':'result.txt','content':'Solved beyond old caps'})
+            return self.response(text='Implemented the result.')
+        messages,model,execute=self.run_loop(reply,task_request_limit=None,task_token_limit=None,
+                                             task_time_limit_seconds=None)
+        self.assertGreater(model.call_count,128)
+        self.assertGreater(messages[0][KEY]['tokens'],120000)
+        self.assertEqual((self.root/'result.txt').read_text(),'Solved beyond old caps')
+        self.assertEqual(AGENT_STATE['task_outcome'],'completed')
+        self.assertEqual(execute.call_count,2)
 
 
 class CheckpointTests(fixtures.Workspace):

@@ -117,10 +117,10 @@ class ProtocolTests(unittest.TestCase):
         self.assertLess(estimate_tokens(result) + cost + usage['reserved_output'], 2048)
         self.assertEqual(usage['tool_schema_tokens'], cost)
 
-    def test_identical_no_progress_response_stops_and_new_progress_resets_budget(self):
+    def test_identical_response_gets_changed_guidance_without_ending_the_task(self):
         repair = protocol.ActionRepair()
         self.assertIsNotNone(repair.next_message('Create arbitrary.txt', 'Creating the file.', 0))
-        self.assertIsNone(repair.next_message('Create arbitrary.txt', 'Creating  the file.', 0))
+        self.assertIn('Change the action format',repair.next_message('Create arbitrary.txt', 'Creating  the file.', 0)['content'])
         self.assertIsNotNone(repair.next_message('Create arbitrary.txt', 'Creating the file.', 1))
 
 
@@ -128,13 +128,16 @@ class ActionLoopTests(fixtures.Workspace):
     response = fixtures.LoopTests.response
     run_loop = fixtures.LoopTests.run_loop
 
-    def test_repeated_action_prose_stops_after_one_structured_repair(self):
-        responses = [self.response(text='Creating the requested file and folder.') for _ in range(2)]
+    def test_repeated_action_prose_recovers_to_real_outputs_without_a_retry_cap(self):
+        responses = [self.response(text='Creating the requested file and folder.') for _ in range(4)]
+        responses += [self.response('write_file',{'path':'fresh.txt','content':''}),
+                      self.response('make_directory',{'path':'output'})]
         messages, spy = self.run_loop(responses, 'Create a file named fresh.txt then make a folder named output')
-        self.assertEqual(self.model_calls, 2)
-        spy.assert_not_called()
-        self.assertIn('Incomplete:', messages[-1]['content'])
-        self.assertEqual(len([m for m in messages if m.get('_galam_tool_mode') == 'required']), 1)
+        self.assertEqual(self.model_calls, 6)
+        self.assertEqual(spy.call_count,2)
+        self.assertTrue((self.root/'fresh.txt').is_file())
+        self.assertTrue((self.root/'output').is_dir())
+        self.assertEqual(AGENT_STATE['task_outcome'],'completed')
 
     def test_native_repair_runs_actual_generic_file_and_directory_tools(self):
         responses = [self.response(text='Creating the requested outputs.'),

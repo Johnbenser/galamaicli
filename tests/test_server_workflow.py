@@ -87,15 +87,16 @@ class ServerCompletionTests(fixtures.Workspace):
     def test_successful_inspection_is_not_completion_of_requested_server_start(self):
         placeholder=self.response(text='The model did not provide a final answer or a complete action.')
         placeholder[0].incomplete=True
-        responses=[self.response('execute_bash',{'command':'pwd'}),placeholder,placeholder]
+        responses=[self.response('execute_bash',{'command':'pwd'}),placeholder,placeholder,
+                   self.response(text='Which command should I use for the missing entrypoint?')]
         messages,_=self.run_loop(responses,'Go to my project and run the server first')
-        self.assertIn('Incomplete:',messages[-1]['content'])
+        self.assertIn('Which command',messages[-1]['content'])
         self.assertEqual(AGENT_STATE['task_outcome'],'incomplete')
         self.assertEqual(messages[-1]['_galam_response_stats']['status'],'incomplete')
         self.assertIn('HTTP-verified server startup',str(messages))
 
 
-    def test_resumed_continue_retains_original_server_goal_and_reports_incomplete(self):
+    def test_resumed_continue_retains_original_server_goal_until_user_cancels(self):
         import galam
         messages=[{'role':'user','content':'Go to my project and run the server first'},
                   {'role':'assistant','content':'Inspecting the project.'},
@@ -103,14 +104,24 @@ class ServerCompletionTests(fixtures.Workspace):
                   {'role':'user','content':'continue'}]
         response=self.response(text='The model did not provide a final answer or a complete action.')
         response[0].incomplete=True
+        calls=0
+        def reply(history):
+            nonlocal calls
+            calls+=1
+            if calls==6:
+                from engine.cancellation import cancel_current
+                cancel_current()
+                return None
+            return response
         with patch.object(galam,'lang_workflow_available',return_value=False), \
-             patch.object(galam,'query_with_fallback',return_value=response) as query, \
+             patch.object(galam,'query_with_fallback',side_effect=reply) as query, \
              patch.object(galam,'execute_tool_call') as action, \
              patch.object(galam,'direct_command_for_request',return_value=None),contextlib.redirect_stdout(io.StringIO()):
             galam.run_agent_loop(messages,'fixture-resume')
-        action.assert_not_called();self.assertEqual(query.call_count,2)
+        action.assert_not_called();self.assertEqual(query.call_count,6)
         self.assertIn('HTTP-verified server startup',str(messages))
-        self.assertEqual(messages[-1]['_galam_response_stats']['status'],'incomplete')
+        self.assertEqual(AGENT_STATE['last_task_timing']['status'],'cancelled')
+        self.assertTrue(any(m.get('_galam_response_stats',{}).get('status')=='cancelled' for m in messages))
 
     def test_router_marks_reasoning_only_reply_as_incomplete_without_extra_requests(self):
         from routers import manager

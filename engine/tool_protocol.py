@@ -101,7 +101,7 @@ def reject_unsupported(response, endpoint, model, config, payload):
 
 def needs_clarification(text):
     return bool("?" in text and re.search(
-        r"\b(?:which|what|where)\s+(?:file|folder|path|directory|name|command|model|endpoint|content)|"
+        r"\b(?:which|what|where)\s+(?:project|app|service|port|file|folder|path|directory|name|command|model|endpoint|content)|"
         r"\b(?:could|can)\s+you\s+(?:clarify|provide|specify)|\bplease\s+(?:clarify|provide|specify)", text, re.I))
 
 
@@ -109,23 +109,19 @@ class ActionRepair:
     """Change the protocol once; do not repeat the same no-progress exchange."""
     def __init__(self):
         self.responses = set()
-        self.attempts = {}
 
     def next_message(self, request, response, progress):
         signature = (progress, re.sub(r"\s+", " ", response).strip().lower())
-        count = self.attempts.get(progress, 0)
-        if signature in self.responses or count >= 2:
-            return None
+        repeated = signature in self.responses
         self.responses.add(signature)
-        self.attempts[progress] = count + 1
-        return {"role": "user", "_galam_internal": True, "_galam_tool_mode": "required", "content": (
+        return {"role": "user", "_galam_internal": True, "_galam_guidance":"protocol", "_galam_tool_mode": "required", "content": (
             "[Action protocol repair] The task is not complete. No complete tool call was returned for the remaining task. "
             "Do not repeat an announcement. Use the tool interface now. If native tools are unavailable, "
             "return exactly one complete <tool_call>{\"name\":\"TOOL_NAME\",\"arguments\":{...}}</tool_call>. "
             "Choose a real tool and all required arguments from the available contract. "
             "Use literal file content, not undefined shell variables. Preserve unrelated files. "
             "If essential input is missing, ask one concrete question rather than guessing. "
-            f"Original request: {request}")}
+            f"Original request: {request}" + ('\nThe same announcement already failed. Change the action format or inspect the specific blocker; do not repeat it.' if repeated else ''))}
 
 
 def wire_text_messages(messages):

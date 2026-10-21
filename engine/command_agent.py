@@ -8,7 +8,7 @@ import uuid
 _ACTIVE = ContextVar('galam_command_agent', default=None)
 
 SYSTEM = ("You are Galam's Command Agent, using the user's selected model. Complete only the current "
-          "authorized startup task. Inspect the actual entrypoint, retain its complete command and preserve "
+          "authorized startup task. Use observed entrypoints; inspect only unresolved prerequisites, retain the complete command and preserve "
           "the project's build/start chain. For a long-running command use execute_bash(background=true), "
           "with local readiness_url when known. Local code waits for build/readiness; do not poll with AI calls "
           "or launch another live copy. On a real error inspect the affected source, make a focused permitted "
@@ -51,6 +51,7 @@ class CommandAgent:
         from engine.context_manager import is_user_request, task_request, _CONSTRAINT
         from storage.conversations import scoped_messages
         source = scoped_messages(messages, conversation_id)
+        self.recall_source = source
         humans = [i for i,m in enumerate(source) if is_user_request(m)]
         anchor = humans[-1]
         goal = task_request(source)
@@ -61,8 +62,10 @@ class CommandAgent:
         constraints = list(dict.fromkeys(line for m in source[:start] if is_user_request(m)
             for line in str(m.get('content','')).splitlines() if _CONSTRAINT.search(line)))
         rules = [m for m in source[:start] if m.get('role') == 'system']
-        self.messages = rules + [{'role':'system', 'content':SYSTEM + (
-            '\nExisting user constraints:\n'+'\n'.join(constraints) if constraints else '')}] + source[start:]
+        self.messages = rules + [{'role':'system', '_galam_generated_system':True, 'content':SYSTEM}]
+        if constraints:
+            self.messages.append({'role':'system','content':'Existing user constraints (latest instructions take precedence):\n'+'\n'.join(constraints)})
+        self.messages += source[start:]
         self.seed = len(self.messages)
         self.flushed = self.seed
         self.parent = messages
@@ -89,7 +92,8 @@ class CommandAgent:
         return self
 
     def flush(self):
-        self.parent.extend(self.messages[self.flushed:])
+        if self.parent is not self.messages:
+            self.parent.extend(self.messages[self.flushed:])
         self.flushed = len(self.messages)
         if self.checkpoint:
             self.checkpoint()

@@ -94,7 +94,9 @@ def _recorded_post(url, headers, payload, stream_enabled, timeout):
     profile = request_profile()
     from engine.api_protocols import prepare_payload
     payload=prepare_payload(url,payload)
-    model = payload.get('model') or (url.split('/models/',1)[1].split(':',1)[0] if '/models/' in url else CONFIG.get('active_model',''))
+    model = payload.get('model') or (url.split('/models/',1)[1].split(':',1)[0] if '/models/' in url else profile.get('model') or CONFIG.get('active_model',''))
+    from engine.context_manager import validate_request_capacity
+    validate_request_capacity(payload,profile.get('endpoint') or CONFIG.get('active_endpoint',''),model,CONFIG)
     row = usage_meter.begin_request(profile.get('endpoint') or CONFIG.get('active_endpoint',''),model,payload,delta='/ai/run/' in url)
     try:
         response = cancellation.call(lambda: SESSION.post(url,headers=headers,json=payload,
@@ -110,6 +112,9 @@ def _recorded_urllib(url,headers,payload,timeout):
     profile = request_profile()
     from engine.api_protocols import prepare_payload
     payload=prepare_payload(url,payload)
+    from engine.context_manager import validate_request_capacity
+    validate_request_capacity(payload,profile.get('endpoint') or CONFIG.get('active_endpoint',''),
+                              payload.get('model') or profile.get('model') or CONFIG.get('active_model',''),CONFIG)
     row = usage_meter.begin_request(profile.get('endpoint') or CONFIG.get('active_endpoint',''),payload.get('model',profile.get('model') or CONFIG.get('active_model','')),payload,delta='/ai/run/' in url)
     try:
         response = cancellation.call(lambda: urllib_stream_request(url,headers,payload,timeout=timeout),
@@ -229,7 +234,7 @@ def _rate_limit_delay(response):
             match = re.search(r'(?:retryDelay["\s:]+|(?:retry|try again) in\s+)(\d+(?:\.\d+)?)s', text, re.I)
             if match:
                 delay = float(match.group(1)) + 0.5
-    return max(0.1, delay) if delay is not None and 0 <= delay <= 55 else None
+    return max(0.1, delay) if delay is not None and delay >= 0 else None
 
 def load_model_rules(model_name: str) -> dict:
     m_lower = model_name.lower()
@@ -650,7 +655,8 @@ def build_enforced_messages(messages, active_ep, active_m, native_tools=True, tr
                       action, directory, snapshot, GLOBAL_TASK_MANAGER.get_active_tasks() if action else ())
     if action:
         prompt += response_contract(bool(protocol))
-    context_config = dict(CONFIG, _tool_schema_tokens=estimate_tokens(protocol)+16 if protocol else 0)
+    context_config = dict(CONFIG, _tool_schema_tokens=estimate_tokens(protocol)+96 if protocol else 0,
+                          _recall_messages=messages)
     context_messages = wire_messages(messages) if protocol else wire_text_messages(messages)
     enforced, usage = assemble_context(context_messages, prompt, active_ep, active_m, context_config, directory)
     if track_usage:
@@ -1107,13 +1113,13 @@ def query_with_fallback(*args, **kwargs):
             # If the stream cut off, hit max_tokens, or ended mid-sentence/mid-tool-call,
             # automatically treat the remaining generation as a continuation request so it
             # seamlessly continues all along without aborting or stalling.
-            max_continuations = 3
             cont_idx = 0
-            while cont_idx < max_continuations and not AGENT_STATE.get("abort", False):
+            previous_continuations = set()
+            while not AGENT_STATE.get("abort", False):
                 if not _is_stream_truncated(last_finish_reason, full_content, full_reasoning, streamed_tool_calls):
                     break
                 cont_idx += 1
-                thought_ui.show_spinner(f"Output truncated by token limit · Auto-continuing ({cont_idx}/{max_continuations})...")
+                thought_ui.show_spinner(f"Output truncated by provider · Continuing ({cont_idx})...")
                 AGENT_STATE["is_streaming"] = True
 
                 cont_messages = list(raw_messages)
@@ -1136,6 +1142,8 @@ def query_with_fallback(*args, **kwargs):
                     cont_messages.append({"role": "user", "content": cont_prompt})
 
                 c_resp=None
+                before_content, before_reasoning = len(full_content), len(full_reasoning)
+                before_tools = json.dumps(streamed_tool_calls,sort_keys=True)
                 try:
                     c_enforced = build_enforced_messages(cont_messages, active_ep, model_name)
                     c_url, c_headers, c_payload = build_request_data(
@@ -1238,6 +1246,14 @@ def query_with_fallback(*args, **kwargs):
                     AGENT_STATE["is_streaming"] = False
                     if c_resp is not None:
                         retained_reasoning.extend(getattr(c_resp,'_galam_response_reasoning',[]))
+                after_tools = json.dumps(streamed_tool_calls,sort_keys=True)
+                delta = (full_content[before_content:], full_reasoning[before_reasoning:],
+                         after_tools if after_tools != before_tools else '')
+                if delta == ('','','') or delta in previous_continuations:
+                    # An unchanged provider response needs another task approach,
+                    # not another identical continuation. This is not a step cap.
+                    break
+                previous_continuations.add(delta)
 
 
             tail_content, tail_reason = reasoning_stream.feed(final=True)

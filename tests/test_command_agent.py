@@ -148,8 +148,16 @@ class CommandAgentTests(fixtures.Workspace):
                     text=''.join(value for _,value in dock_layout.get_bottom_toolbar_tokens())
                 self.assertIn('Command agent · Building',text)
                 self.assertNotIn('running\n',text)
-        with agent, patch.object(agent,'update',side_effect=update),patch.dict(CONFIG,{'server_build_timeout':6}):
-            result=launch_process(command,str(self.root),task_runner.get_subprocess_env(),self.manager,url,timeout=1)
+        # Synchronize the build release with the observer, rather than relying on
+        # a one-second process spawn deadline on a loaded Android device.
+        path=self.root/'service_task.py'
+        path.write_text(path.read_text().replace('time.sleep(1.5)',
+            'from pathlib import Path\nwhile not Path("release-build").exists(): time.sleep(.02)'))
+        def release(stage,detail=''):
+            update(stage,detail)
+            if stage=='Building':(self.root/'release-build').touch()
+        with agent, patch.object(agent,'update',side_effect=release),patch.dict(CONFIG,{'server_build_timeout':15}):
+            result=launch_process(command,str(self.root),task_runner.get_subprocess_env(),self.manager,url,timeout=8)
         self.assertTrue(result.success,result.output)
         self.assertIn('Building',stages)
         self.assertEqual(usage.ledger()['requests'],[])

@@ -81,10 +81,13 @@ class TaskProgress:
     def budget_reason(self, payload=None):
         self.sync()
         # A task allowance is cumulative across checkpoints/resume, not per window.
-        limits = (('requests', 'task_request_limit', 128), ('tokens', 'task_token_limit', 120000),
-                  ('elapsed', 'task_time_limit_seconds', 1800))
+        limits = (('requests', 'task_request_limit', None), ('tokens', 'task_token_limit', None),
+                  ('elapsed', 'task_time_limit_seconds', None))
         for field, setting, default in limits:
-            limit = max(1, int(self.config.get(setting, default)))
+            raw = self.config.get(setting, default)
+            if raw is None or raw == 0:
+                continue
+            limit = max(1, int(raw))
             amount = self.state[field]
             if field == 'tokens' and payload is not None:
                 from engine.context_manager import estimate_tokens
@@ -107,10 +110,7 @@ class TaskProgress:
         self.state['stalled'] = self.stalled
         self.new_in_round = False
         self.round_started = True
-        if self.stalled >= 4:
-            self.stop_reason = 'Repeated work produced no new evidence after recovery; progress is saved.'
-            return self.stop_reason
-        if self.stalled == 2:
+        if self.stalled >= 2:
             self.pending_recovery = True
         if self.state['rounds'] >= self.next_window:
             self.next_window += self.window
@@ -129,10 +129,11 @@ class TaskProgress:
         next_action = ('\nThe launch recipe is already observed. Propose a reviewed execute_bash call with background=true '
                        'to launch it, or identify a specific unresolved prerequisite. More unrelated source/listing reads '
                        'do not advance startup.\n' + render_evidence(self.state, 900)) if self.service_goal and self.state.get('launch') else ''
-        return {'role': 'user', '_galam_internal': True, 'content':
+        return {'role': 'user', '_galam_internal': True, '_galam_guidance': 'recovery', 'content':
             '[Workflow recovery] Recent rounds repeated known evidence. Use a different approach toward '
             'the original goal; do not repeat listings or archive retrieval. If blocked, explain the actual '
-            'blocker. Existing constraints and review decisions still apply.' + next_action}
+            'blocker supported by actual evidence. Choose an untried useful approach; no step count ends this task. '
+            'Existing constraints and review decisions still apply.' + next_action}
 
     def read_key(self, tool, args, directory):
         """Cache exact file ranges only, invalidated by actual contents and paths."""

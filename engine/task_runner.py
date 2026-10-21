@@ -511,6 +511,7 @@ def parse_and_run_curl_command(cmd_str: str, env=None) -> Optional[Tuple[str, bo
         headers = {}
         data = None
         url = None
+        timeout = 30
         i = 1
 
         while i < len(tokens):
@@ -535,22 +536,32 @@ def parse_and_run_curl_command(cmd_str: str, env=None) -> Optional[Tuple[str, bo
                 if method == "GET":
                     method = "POST"
                 i += 2
+            elif tok in ('--max-time', '-m', '--connect-timeout') and i + 1 < len(tokens):
+                timeout = max(.1, float(tokens[i+1]))
+                i += 2
+            elif tok == '--url' and i + 1 < len(tokens):
+                url = tokens[i+1]
+                i += 2
             elif tok in ("-s", "-sS", "-k", "--insecure", "-L", "--location", "-v"):
+                i += 1
+            elif tok in ('-f', '--fail', '--fail-with-body'):
                 i += 1
             elif not tok.startswith("-") and url is None:
                 url = tok
                 i += 1
             else:
-                i += 1
+                # Preserve semantics by declining unsupported flags, rather than
+                # guessing their arity or turning their values into a URL.
+                return None
 
         if not url:
             return None
 
-        body, status = python_curl(url=url, method=method, headers=headers, data=data)
+        body, status = python_curl(url=url, method=method, headers=headers, data=data, timeout=timeout)
         is_err = status != 200 and not (200 <= status < 300)
         return body, is_err
     except Exception as e:
-        return f"[Python Curl Parse Error: {e}]", False
+        return f"[Python Curl Parse Error: {e}]", True
 
 def session_directory() -> str:
     directory = AGENT_STATE.get("working_directory") or os.getcwd()

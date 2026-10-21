@@ -1,5 +1,7 @@
 # Same-model Command Agent
 
+Updated startup routing, conditional recall and uncapped continuation are described in [the continuation implementation report](CONTINUATION_RECALL_IMPLEMENTATION.md). The verification below records the earlier Command Agent release; the latest complete gate is 362 passing tests plus a separate two-case live-model pilot.
+
 ## Implemented flow
 
 ```mermaid
