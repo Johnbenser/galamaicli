@@ -1,5 +1,7 @@
 """Translate Responses wire objects to Galam's existing chat/tool contract."""
 import copy
+import json
+import uuid
 from urllib.parse import urlsplit
 
 
@@ -18,7 +20,9 @@ def retain_reasoning(message,endpoint,model):
 
 
 def prepare_payload(url,payload):
-    if not urlsplit(url).path.rstrip('/').endswith('/responses'):return payload
+    kind=wire_format(url,payload.get('model',''))
+    if kind=='ollama':return ollama_payload(payload)
+    if kind!='responses':return payload
     if 'messages' not in payload:return payload
     result={key:copy.deepcopy(value) for key,value in payload.items()
             if key not in ('messages','max_tokens','max_completion_tokens','tools','tool_choice','chat_template_kwargs')}
@@ -138,3 +142,72 @@ def response_chunk(data,response=None):
             if function:deltas.append({'index':index,'id':call['id'],'type':'function','function':function})
         if tools and finish=='stop':finish='tool_calls'
     return text,reasoning,deltas,finish
+
+
+def wire_format(url,model=''):
+    from config import CONFIG
+    from storage.endpoints import ENDPOINT_REGISTRY
+    profile=ENDPOINT_REGISTRY.get(CONFIG.get('active_endpoint'),{}).get('models',{}).get(model,{}).get('custom_connection',{})
+    if profile.get('url')==url:return profile['api_format']
+    path=urlsplit(url).path.rstrip('/')
+    if path.endswith('/api/chat'):return 'ollama'
+    if path.endswith(('/response','/responses')):return 'responses'
+    return 'chat_completions'
+
+
+def ollama_payload(payload):
+    result={key:copy.deepcopy(payload[key]) for key in ('model','stream','tools') if key in payload}
+    options={}
+    for source,target in (('max_tokens','num_predict'),('max_completion_tokens','num_predict'),
+                          ('temperature','temperature'),('top_p','top_p'),('seed','seed'),('stop','stop')):
+        if source in payload:options[target]=payload[source]
+    if options:result['options']=options
+    messages=[];names={}
+    for original in payload.get('messages',[]):
+        message={k:copy.deepcopy(v) for k,v in original.items() if k in ('role','content','tool_calls')}
+        for call in message.get('tool_calls',[]):
+            function=call['function'];names[call.get('id')]=function['name']
+            arguments=function.get('arguments',{})
+            if isinstance(arguments,str):arguments=json.loads(arguments or '{}')
+            function['arguments']=arguments
+            call.pop('id',None)
+            call.pop('index',None)
+        if message.get('role')=='tool':
+            name=names.get(original.get('tool_call_id')) or original.get('name')
+            if name:message['tool_name']=name
+        messages.append(message)
+    result['messages']=messages
+    return result
+
+
+def ollama_tools(message):
+    tools=[]
+    for index,call in enumerate(message.get('tool_calls',[]) or []):
+        function=call.get('function',{})
+        arguments=function.get('arguments',{})
+        tools.append({'id':call.get('id') or 'ollama_'+uuid.uuid4().hex,'index':index,'type':'function',
+                      'function':{'name':function.get('name',''),'arguments':arguments if isinstance(arguments,str) else json.dumps(arguments)}})
+    return tools
+
+
+def ollama_chunk(data,response=None):
+    message=data.get('message',{})
+    tools=ollama_tools(message)
+    start=getattr(response,'_galam_ollama_tool_count',0) if response is not None else 0
+    for index,tool in enumerate(tools,start):tool['index']=index
+    if response is not None:response._galam_ollama_tool_count=start+len(tools)
+    finish=('length' if data.get('done_reason')=='length' else 'stop') if data.get('done') else ''
+    return message.get('content') or '',message.get('thinking') or '',tools,finish
+
+
+def streaming_response(content_type):
+    return any(kind in content_type.lower() for kind in ('text/event-stream','application/x-ndjson','application/ndjson'))
+
+
+def stream_data(line):
+    """SSE and native Ollama NDJSON share the cancellation-aware line reader."""
+    if isinstance(line,bytes):line=line.decode('utf-8')
+    line=line.strip()
+    if line.startswith('data:'):return line[5:].strip()
+    if line.startswith('{'):return line
+    return None

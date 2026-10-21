@@ -1,3 +1,4 @@
+from engine.api_protocols import streaming_response, stream_data
 import sys
 import os
 import re
@@ -264,6 +265,9 @@ def _detect_and_synthesize_tool_calls(text: str, resp_json: dict = None) -> list
                 from engine.api_protocols import output_parts
                 tools=output_parts(data)[2]
                 if tools:return tools
+            if isinstance(data.get('message'),dict) and data['message'].get('tool_calls'):
+                from engine.api_protocols import ollama_tools
+                return ollama_tools(data['message'])
             choices = data.get("choices", [])
             if choices and isinstance(choices[0], dict):
                 msg = choices[0].get("message", {})
@@ -287,6 +291,10 @@ def _extract_stream_chunk(chunk_json,response=None):
     try:converted=response_chunk(chunk_json,response)
     except ValueError as error:raise ProviderStreamError(str(error)) from None
     if converted is not None:return converted
+
+    if isinstance(chunk_json.get('message'),dict):
+        from engine.api_protocols import ollama_chunk
+        return ollama_chunk(chunk_json,response)
 
     # Cohere v2 carries text in delta.message.content rather than choices[].
     if chunk_json.get("type") == "content-delta":
@@ -455,7 +463,7 @@ def _extract_response_content(endpoint_name: str, model_name: str, resp_json):
 
     if isinstance(data.get("message"), dict):
         message = data["message"]
-        return text_value(message.get("content", "")).strip(), text_value(message.get("reasoning", "")).strip()
+        return text_value(message.get("content", "")).strip(), text_value(message.get("thinking") or message.get("reasoning", "")).strip()
 
     if 'output' in data:
         from engine.api_protocols import output_parts
@@ -663,13 +671,13 @@ def query_subagent(messages: list) -> str:
             from engine.transparency import begin_generation, append_reasoning
             reasoning_row = begin_generation(model_name + " (side request)")
             splitter = ReasoningStream()
-            if stream_enabled and "text/event-stream" in resp.headers.get("Content-Type", ""):
+            if stream_enabled and streaming_response(resp.headers.get("Content-Type", "")):
                 for line in cancellation.lines(resp.iter_lines(), close=getattr(resp, "close", None)):
                     if not line:
                         continue
                     decoded = line.decode("utf-8").strip()
-                    if decoded.startswith("data:"):
-                        raw_chunk = decoded[5:].strip()
+                    if stream_data(decoded) is not None:
+                        raw_chunk = stream_data(decoded)
                         if raw_chunk == "[DONE]":
                             break
                         try:
@@ -946,7 +954,7 @@ def query_with_fallback(*args, **kwargs):
             AGENT_STATE["is_streaming"] = True
 
             c_type = resp.headers.get("Content-Type", "") if hasattr(resp, "headers") else (resp.info().get("Content-Type", "") if hasattr(resp, "info") else "")
-            if stream_enabled and "text/event-stream" in c_type:
+            if stream_enabled and streaming_response(c_type):
                 try:
                     line_iter = cancellation.lines(resp if is_urllib else resp.iter_lines(), close=getattr(resp, "close", None))
                     for line in line_iter:
@@ -959,8 +967,8 @@ def query_with_fallback(*args, **kwargs):
                         if not line:
                             continue
                         decoded = line.decode("utf-8").strip()
-                        if decoded.startswith("data:"):
-                            raw_chunk = decoded[5:].strip()
+                        if stream_data(decoded) is not None:
+                            raw_chunk = stream_data(decoded)
                             if raw_chunk == "[DONE]":
                                 break
                             try:
@@ -1114,7 +1122,7 @@ def query_with_fallback(*args, **kwargs):
 
                     c_type_cont = c_resp.headers.get("Content-Type", "") if hasattr(c_resp, "headers") else (c_resp.info().get("Content-Type", "") if hasattr(c_resp, "info") else "")
                     last_finish_reason = "stop"
-                    if stream_enabled and "text/event-stream" in c_type_cont:
+                    if stream_enabled and streaming_response(c_type_cont):
                         c_line_iter = cancellation.lines(c_resp if c_is_urllib else c_resp.iter_lines(), close=getattr(c_resp, "close", None))
                         for c_line in c_line_iter:
                             if AGENT_STATE.get("abort", False):
@@ -1122,8 +1130,8 @@ def query_with_fallback(*args, **kwargs):
                             if not c_line:
                                 continue
                             c_decoded = c_line.decode("utf-8").strip()
-                            if c_decoded.startswith("data:"):
-                                c_raw = c_decoded[5:].strip()
+                            if stream_data(c_decoded) is not None:
+                                c_raw = stream_data(c_decoded)
                                 if c_raw == "[DONE]":
                                     break
                                 try:

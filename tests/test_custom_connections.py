@@ -48,18 +48,18 @@ class ConnectionStorageTests(Workspace):
             'three':{'custom_connection':{'api_format':'chat_completions'}}}}
         profile=store.validate_profile({**self.profile,'endpoint':'Mixed','api_format':'default'})
         self.assertEqual((profile['api_format_mode'],profile['api_format']),('default','responses'))
-        self.assertEqual(profile['url'],'https://fixture.invalid/v1/responses')
+        self.assertEqual(profile['url'],'https://fixture.invalid/v1')
         self.assertEqual(store.default_api_format('Mixed','three'),'chat_completions')
         self.assertEqual(store.validate_profile({**self.profile,'endpoint':'Mixed','api_format':'chat_completions'})['api_format'],'chat_completions')
         self.assertEqual(store.validate_profile(profile),profile)
 
-    def test_ollama_native_urls_and_repeated_route_suffixes_normalize_to_compatible_endpoint(self):
+    def test_entered_urls_remain_exact_and_ollama_default_detects_native_protocol(self):
         for value in ('https://ollama.com/api','https://ollama.com/api/chat',
-                      'https://ollama.com/api/chat/chat/completions',
-                      'https://ollama.com/v1/chat/completions/chat/completions'):
-            self.assertEqual(store.normalize_url(value,'chat_completions'),'https://ollama.com/v1/chat/completions')
-        self.assertEqual(store.normalize_url('http://localhost:11434/api','responses'),'http://localhost:11434/v1/responses')
-        self.assertEqual(store.normalize_url('https://other.invalid/api','chat_completions'),'https://other.invalid/api/chat/completions')
+                      'https://custom.invalid/v3/chat/completions','https://api.invalid/v1/'):
+            self.assertEqual(store.normalize_url(value,'chat_completions'),value)
+        profile=store.validate_profile({**self.profile,'url':'https://ollama.com/api/chat','api_format':'default'})
+        self.assertEqual(profile['url'],'https://ollama.com/api/chat')
+        self.assertEqual(profile['api_format'],'ollama')
 
     def test_matching_provider_host_reuses_group_key_but_other_hosts_get_separate_reference(self):
         ENDPOINT_REGISTRY['Builtin']['api_key_env']='PROVIDER_API_KEY'
@@ -182,7 +182,7 @@ class ConnectionStorageTests(Workspace):
 
     def test_urls_accept_bases_and_correct_singular_response(self):
         for value in ('https://api.invalid','https://api.invalid/v1/','https://api.invalid/v1/response','https://api.invalid/v1/responses'):
-            self.assertEqual(store.normalize_url(value,'responses'),'https://api.invalid/v1/responses')
+            self.assertEqual(store.normalize_url(value,'responses'),value)
         self.assertEqual(store.normalize_url('https://api.invalid/api/v1/chat/completions','chat_completions'),
                          'https://api.invalid/api/v1/chat/completions')
         self.assertNotEqual(store.default_key_env('My API','https://a.invalid/v1'),store.default_key_env('My API','https://b.invalid/v1'))
@@ -347,7 +347,7 @@ class ResponsesProtocolTests(Workspace):
             for api_format in ('chat_completions','responses'):
                 with self.subTest(api_format=api_format):
                     profile=store.save_profile({**self.profile,'endpoint':api_format,'model':'fixture-'+api_format,
-                                               'api_format':api_format,'url':f'http://127.0.0.1:{server.server_port}/v1'})
+                                               'api_format':api_format,'url':f'http://127.0.0.1:{server.server_port}/v1/'+store.FORMATS[api_format]})
                     messages=[{'role':'user','content':'Use the terminal to inspect output, then explain the result.'}]
                     with patch.dict(CONFIG,{'active_endpoint':profile['endpoint'],'active_model':profile['model'],'stream':False}), \
                          patch.object(manager,'save_settings'),patch.object(manager,'log_model_interaction'),contextlib.redirect_stdout(io.StringIO()):
@@ -388,7 +388,7 @@ class ConnectionEditorTests(Workspace):
                     self.assertEqual(editor.picker.values,[('Builtin','1. Builtin'),('Other','2. Other')])
                     pipe.send_text('2\r');await asyncio.sleep(.06)
                     self.assertEqual(editor.page,'form');self.assertEqual(editor.selected_endpoint,'Other')
-                    self.assertEqual(editor.fields['url'].text,'https://other.invalid/v1')
+                    self.assertEqual(editor.fields['url'].text,'https://other.invalid/v1/chat/completions')
                     self.assertEqual(editor.protocol.current_value,'default')
                 finally:
                     if not task.done():editor.app.exit()
@@ -411,7 +411,8 @@ class ConnectionEditorTests(Workspace):
             self.assertEqual(editor.selected_endpoint,expected)
             self.assertEqual(editor.fields['key'].text,'');self.assertEqual(editor.fields['api_key_env'].text,'')
             editor.fields['url'].text='https://other.invalid/api/v2'
-            self.assertIn('/api/v2/chat/completions',editor.default_path())
+            self.assertIn('unchanged',editor.default_path())
+            self.assertEqual(editor.fields['url'].text,'https://other.invalid/api/v2')
 
     def test_save_confirmation_stays_in_ui_and_password_is_never_rendered(self):
         from ui.endpoint_manager import EndpointManager
@@ -427,6 +428,7 @@ class ConnectionEditorTests(Workspace):
                 for name,value in self.profile.items():
                     if name in editor.fields:editor.fields[name].text=str(value)
                 editor.fields['key'].text='fixture-secret-only'
+                editor.step=2;editor.focus_step()
                 editor.app.layout.focus(editor.fields['key'])
                 with patch('ui.endpoint_manager.save_settings') as save,contextlib.redirect_stdout(io.StringIO()) as out:
                     task=asyncio.create_task(editor.app.run_async())
@@ -435,6 +437,8 @@ class ConnectionEditorTests(Workspace):
                         screen=editor.app.renderer.last_rendered_screen
                         visible=''.join(cell.char for row in screen.data_buffer.values() for cell in row.values())
                         self.assertNotIn('fixture-secret-only',visible)
+                        pipe.send_text('\x13');await asyncio.sleep(.08)
+                        self.assertEqual(editor.step,3);self.assertFalse(store.profile_path().exists())
                         pipe.send_text('\x13');await asyncio.sleep(.08)
                         self.assertEqual(out.getvalue(),'');self.assertEqual(editor.page,'result')
                         self.assertEqual(editor.fields['key'].text,'');self.assertNotIn('fixture-secret-only',editor.result_text)

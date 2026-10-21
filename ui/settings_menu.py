@@ -1,11 +1,13 @@
-import sys
 from prompt_toolkit.application import Application
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import Window, HSplit
+from prompt_toolkit.key_binding import KeyBindings,ConditionalKeyBindings,DynamicKeyBindings,merge_key_bindings
+from prompt_toolkit.layout.containers import Window, HSplit,DynamicContainer
+from prompt_toolkit.widgets import Frame,Box
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.application.current import get_app
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.styles import Style
-from prompt_toolkit.filters import to_filter
+from prompt_toolkit.filters import Condition
 from config import CONFIG, save_settings
 from engine.execution_policy import next_mode
 from storage.endpoints import ENDPOINT_REGISTRY
@@ -21,11 +23,12 @@ class InlineSettingsApp:
         from engine.local_ui import LocalScreens
         self.local_screens = LocalScreens(CONFIG, save_settings)
         self.cursor_idx = 0
+        self.status = 'Choose a section to configure your workspace.'
         self.kb = KeyBindings()
         self._setup_bindings()
 
     def _get_items(self):
-        active_ep = self.selected_ep
+        active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", self.selected_ep)
         active_m = CONFIG.get("active_model") or CONFIG.get("model", "")
         clean_m = active_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
         mode = CONFIG.get("mode", "REVIEW").upper().replace("_", "-")
@@ -46,20 +49,18 @@ class InlineSettingsApp:
             items.insert(-1, {"label":"Model Connections", "hint":"[Add / Edit]", "action":"to_connections"})
             return items
         elif self.screen == "endpoints":
-            eps = list(ENDPOINT_REGISTRY.keys())
+            eps = sorted(ENDPOINT_REGISTRY,key=str.casefold)
             return [
-                {"label": ep, "hint": "(active)" if ep == self.selected_ep else "", "id": ep}
+                {"label": ep, "hint": "(active)" if ep == active_ep else "", "id": ep}
                 for ep in eps
             ]
         elif self.screen == "models":
             ep = self.selected_ep
-            if ep not in ENDPOINT_REGISTRY:
-                ep = list(ENDPOINT_REGISTRY.keys())[0]
-            models = list(ENDPOINT_REGISTRY[ep]["models"].keys())
+            models = list(ENDPOINT_REGISTRY.get(ep,{}).get("models",{}))
             return [
                 {
                     "label": m.split("/")[-1].replace("@cf/", "").replace("meta/", ""),
-                    "hint": "(active)" if m == active_m else "",
+                    "hint": "(active)" if m == active_m and self.selected_ep == active_ep else "",
                     "id": m
                 }
                 for m in models
@@ -95,10 +96,12 @@ class InlineSettingsApp:
             if self.screen == "main":
                 act = item.get("action")
                 if act == "to_endpoints":
+                    self.selected_ep=CONFIG.get("active_endpoint",self.selected_ep)
                     self.screen = "endpoints"
-                    eps = list(ENDPOINT_REGISTRY.keys())
+                    eps = sorted(ENDPOINT_REGISTRY,key=str.casefold)
                     self.cursor_idx = eps.index(self.selected_ep) if self.selected_ep in eps else 0
                 elif act == "to_models":
+                    self.selected_ep=CONFIG.get("active_endpoint",self.selected_ep)
                     self.screen = "models"
                     if self.selected_ep == "Local Endpoint":
                         from engine.local_models import refresh_local_models
@@ -123,7 +126,7 @@ class InlineSettingsApp:
                     self.screen = "local"
                     self.cursor_idx = 0
                 elif act == "to_connections":
-                    event.app.exit(result='connections')
+                    self.open_connections(event.app)
                 elif act == "exit":
                     event.app.exit()
 
@@ -148,9 +151,7 @@ class InlineSettingsApp:
                 CONFIG["active_model"] = new_m
                 CONFIG["model"] = new_m
 
-                clean_m = new_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
-                sys.stdout.write(f"\n\033[38;5;39m•\033[0m \033[1;38;5;75mEngine Updated:\033[0m \033[1;38;5;141m[{self.selected_ep}]\033[0m \033[1;38;5;120m{clean_m}\033[0m\n")
-                sys.stdout.flush()
+                self.status = 'Selected: '+self.selected_ep+' / '+new_m
 
                 if self.initial_screen == "models":
                     event.app.exit()
@@ -184,76 +185,74 @@ class InlineSettingsApp:
             else:
                 event.app.exit()
 
+    def page_title(self):
+        return {'main':'Workspace settings','endpoints':'Choose endpoint','models':'Choose model',
+                'local':'Local models','local_add':'Select GGUF','local_result':'Local model status'}.get(self.screen,'Settings')
+
     def get_formatted_text(self):
-        items = self._get_items()
-        if self.screen == "main":
-            title = "Galam.AI Settings"
-        elif self.screen == "endpoints":
-            title = "Select Endpoint"
-        elif self.screen in ("local", "local_add", "local_result"):
-            title = {"local": "Local Models", "local_add": "Select GGUF", "local_result": "Local Model Status"}[self.screen]
-        else:
-            title = f"Select Model [{self.selected_ep}]"
-
-        lines = [("class:title", f"╭── {title}\n")]
-        start_idx = max(0, min(self.cursor_idx - 3, len(items) - 7))
-        visible_items = items[start_idx:start_idx + 7]
-
-        for i, itm in enumerate(visible_items):
-            actual_idx = start_idx + i
-            label = itm.get("label", "")
-            hint = itm.get("hint", "")
-            if actual_idx == self.cursor_idx:
-                lines.append(("class:cursor", "│ ▶ "))
-                lines.append(("class:selected", f"{label:<24}"))
-                if hint:
-                    lines.append(("class:selected_hint", f" {hint}"))
-                lines.append(("", "\n"))
-            else:
-                lines.append(("class:border", "│   "))
-                lines.append(("class:unselected", f"{label:<24}"))
-                if hint:
-                    lines.append(("class:hint", f" {hint}"))
-                lines.append(("", "\n"))
-
-        for _ in range(7 - len(visible_items)):
-            lines.append(("class:border", "│\n"))
-
-        lines.append(("class:border", "╰──────────────────────────────────────────\n"))
-        lines.append(("class:help", "  [↑/↓] Navigate  •  [Enter] Select  •  [Esc] Back\n"))
+        items=self._get_items()
+        size=get_app().output.get_size()
+        width=max(12,size.columns-6)
+        visible=max(3,size.rows-12)
+        start=max(0,min(self.cursor_idx-visible//2,len(items)-visible))
+        def crop(text,limit):
+            result=''
+            for char in text:
+                if get_cwidth(result+char)>limit-1:return result+'…'
+                result+=char
+            return result
+        lines=[]
+        for index,item in enumerate(items[start:start+visible],start):
+            selected=index==self.cursor_idx
+            style='class:selected' if selected else 'class:unselected'
+            lines.append(('class:cursor' if selected else 'class:hint',' › ' if selected else '   '))
+            label=item.get('label','');hint=item.get('hint','')
+            text=label+'  '+hint
+            if get_cwidth(text)>width-3:text=label
+            lines.append((style,crop(text,width-3)))
+            lines.append(('', '\n'))
+        if not items:lines.append(('class:hint','No models here. Add one in Model Connections.'))
         return lines
 
+    def close_connections(self):
+        self.selected_ep=CONFIG.get('active_endpoint',self.selected_ep)
+        self.screen='main';self.cursor_idx=6
+        self.status='Connection editor closed. Saved changes are applied.'
+        self.app.layout.focus(self.menu_window);self.app.invalidate()
+
+    def open_connections(self,app):
+        from ui.endpoint_manager import EndpointManager
+        self.editor=EndpointManager(on_close=self.close_connections)
+        self.editor.app=app
+        self.screen='connections'
+        app.layout.focus(self.editor.endpoint_button if self.editor.page=='form' else self.editor.body)
+        app.invalidate()
+
+    def build_application(self):
+        from ui.settings_theme import SETTINGS_STYLE
+        self.menu_window=Window(FormattedTextControl(self.get_formatted_text),wrap_lines=False)
+        root=HSplit([
+            Window(FormattedTextControl('  GALAM / SETTINGS'),height=1,style='class:title'),
+            Frame(Box(Window(FormattedTextControl(lambda:'Engine  '+str(CONFIG.get('active_endpoint',''))+
+                     '\n'+str(CONFIG.get('active_model',''))),height=2,wrap_lines=False),padding=0),title='Active connection'),
+            Frame(Box(self.menu_window,padding=1),title=self.page_title),
+            Window(FormattedTextControl(lambda:self.status),height=Dimension(min=1,max=2),wrap_lines=True,style='class:status'),
+            Window(FormattedTextControl('↑/↓ move · Enter select · Esc back'),height=2,wrap_lines=True,style='class:hint')])
+        keys=merge_key_bindings([
+            ConditionalKeyBindings(self.kb,Condition(lambda:self.screen!='connections')),
+            ConditionalKeyBindings(DynamicKeyBindings(lambda:self.editor.key_bindings if hasattr(self,'editor') else None),
+                                   Condition(lambda:self.screen=='connections'))])
+        app=Application(layout=Layout(DynamicContainer(lambda:self.editor.root if self.screen=='connections' else root)),
+                        key_bindings=keys,style=SETTINGS_STYLE,full_screen=True,mouse_support=False)
+        app.ttimeoutlen=.1
+        self.app=app
+        return app
+
     def run(self):
-        style = Style.from_dict({
-            'title': 'fg:#38bdf8 bold',
-            'border': 'fg:#3f3f46',
-            'cursor': 'fg:#38bdf8 bold',
-            'selected': 'fg:#ffffff bg:#1e293b bold',
-            'selected_hint': 'fg:#38bdf8 bg:#1e293b bold',
-            'unselected': 'fg:#94a3b8',
-            'hint': 'fg:#64748b',
-            'help': 'fg:#52525b',
-        })
-        app = Application(
-            layout=Layout(HSplit([Window(
-                content=FormattedTextControl(self.get_formatted_text),
-                height=10,
-                dont_extend_height=to_filter(True)
-            )])),
-            key_bindings=self.kb,
-            style=style,
-            full_screen=False
-        )
-        while True:
-            result=app.run()
-            sys.stdout.write("\033[10A\r\033[J")
-            sys.stdout.flush()
-            if result!='connections':break
-            from ui.endpoint_manager import EndpointManager
-            EndpointManager().run()
-            self.selected_ep=CONFIG.get('active_endpoint',self.selected_ep)
-            self.screen='main'
-            self.cursor_idx=1
+        app=self.build_application()
+        try:app.run()
+        finally:
+            if hasattr(self,'editor'):self.editor.clear_key()
 
 def handle_settings_menu():
     InlineSettingsApp(initial_screen="main").run()

@@ -1,51 +1,68 @@
-# Custom model connections — 21 October 2026
+# Settings and custom model connections
 
-## Settings flow
+Updated 21 October 2026.
 
-`/settings` → Model Connections opens a separate full-screen editor after the inline settings application exits and clears its own ten-line region. Closing the editor reopens the existing settings screen and keeps the conversation intact. Existing items and their action meanings are retained; the existing seven-item scroll window handles the added item.
+## Terminal workflow
 
-The editor supports a sorted, numbered endpoint selector, exact model ID, base/full URL, Default with its resolved format/route, optional Chat Completions or Responses overrides, credential variable, masked key, context window and optional immediate activation. Previously saved custom models can be loaded and edited. Complete route pastes select the format; `/response` is normalized to `/responses`. Feedback is rendered inside the application; saving prints no confirmation into its live layout. Escape cancels promptly and discards the key field.
+Settings uses a full-screen colored workspace with an active-engine panel, framed menu, status and keyboard hints. Execution mode, fallback, streaming, provider/model selection and the local GGUF manager retain their existing actions. Browsing another endpoint does not activate it until a model is selected; activation saves the endpoint/model aliases together.
 
-Main/side tasks must finish or be cancelled before editing connections. This avoids reconfiguring a live model exchange. Existing endpoint/settings screens remain available as before.
+Model Connections opens inside the same Application, with its own key bindings, then returns to settings. The wizard has four steps:
 
-## Storage and shell behavior
+1. **Model:** sorted numbered endpoint picker and model ID; existing custom connections can be loaded from Saved models.
+2. **Request:** complete request URL and payload format.
+3. **Credentials:** optional variable reference, masked key, context limit and activation preference.
+4. **Review:** destination group, model, exact URL, resolved payload format, variable reference and activation. The key value is never shown. Saving happens only from this step through the UI.
 
-- Public source contains the implementation, not the user's connection definitions or keys.
-- Definitions: selected home `~/.galam/endpoints.json`, mode 600, metadata and variable references only.
-- Keys: selected home `~/.secrets`, mode 600. The writer preserves unrelated exports/comments, quotes values as literal shell strings and deduplicates the assigned variable.
-- Home selection follows an existing `.secrets` in the current home, or the existing Termux home when the alternate home lacks it. `GALAM_HOME` explicitly overrides selection.
-- The editor has no persistent input history; key rendering is masked and its buffer/undo state clears after save/cancel.
-- A file lock serializes profile/credential updates. Atomic file writes and rollback protect against partial save failures. Symlinked secret/store/RC destinations are refused rather than silently replaced.
-- Bash/Zsh receive one guarded source line when a stored credential is available. Existing source commands are recognized; comments or an echoed source command do not count.
-- The running Galam process receives the saved value immediately. Catalog reload reads the referenced literal value from `.secrets`, so an older export in the launching shell does not override that saved custom credential.
-- A child process cannot rewrite an already-open parent shell's environment. New shells read the guarded RC line; use `source ~/.secrets` in an existing parent shell when that shell itself needs the update.
-- Galam never executes arbitrary code from `.secrets` while loading keys.
+Tab/Shift+Tab changes focus. Ctrl+S advances or saves from Review. Escape goes back, returning to settings from the first step; Cancel discards the form. Narrow layouts stack buttons so they remain reachable. Review text scrolls. Confirmations stay inside the UI.
 
-Built-in model IDs cannot be overwritten through the editor. New models may join existing groups, with their connection stored per model. Models using one credential variable share its value. The editor does not add a key to `storage/keys.json`, settings, model history, or Git.
+The selector uses `select_on_focus=True`: arrows change the checked value along with the highlighted row. Its controls remain stable across render passes. This fixes the stale-value path that could save a Direct choice under Groq. Number entry remains available, including numbers above nine.
 
-## Request/response integration
+## Exact URL contract
 
-The existing action loop remains the canonical contract. New models can use native tool schemas or the existing text fallback. Chat Completions keeps its normal message format. Responses is translated at the transport boundary, after tool options are added, so retries, continuations and side questions use the correct wire shape. Usage estimates count the actual translated request.
+**Default sends the entered request URL unchanged.** Neither default detection nor an explicit payload format appends, strips or replaces API paths. URLs are validated, with surrounding whitespace trimmed; credentials, query strings, fragments, malformed URLs and known non-chat routes are refused.
 
-Responses uses input items, flat function definitions, `function_call_output` with the original call ID, `max_output_tokens`, and stateless continuity. JSON and SSE output normalize back to Galam responses. Argument deltas and final snapshots do not duplicate calls or arguments. Failed/incomplete responses do not masquerade as completed answers. Encrypted reasoning items are retained only for the originating endpoint/model/URL and are excluded when switching connections; only provider-supplied summaries are displayed.
+Examples:
 
-Custom models survive local-server catalog refresh. Custom routes assigned to a built-in provider bypass that provider's hardcoded request URL, while existing built-in models retain their routes. Custom context limits cap larger global context preferences.
+| Entered request URL | Default payload |
+| --- | --- |
+| `https://ollama.com/api/chat` | Native Ollama Chat |
+| `https://service.example/v1/chat/completions` | Chat Completions |
+| `https://service.example/v1/responses` | Responses |
+| A custom request path | Saved model format or the endpoint catalog preference |
 
-Official format references: [function calling](https://developers.openai.com/api/docs/guides/function-calling) and [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events). Compatibility with a third-party service still depends on its implementation of those formats.
+An empty or untouched suggested URL can follow the selected provider. A typed URL is preserved when changing the catalog group. Credential inputs clear only when an automatically suggested destination changes host. A group name controls where the model appears; the request URL controls where it connects.
+
+Use the provider's full documented route. Responses is normally plural; a typed singular `/response` is preserved, so a provider may reject it. A bare base URL is also preserved and must be completed by the user if the server requires a route. This replaces the earlier automatic route-normalization behavior, including the unwanted Ollama-to-OpenAI conversion.
+
+## Storage and credentials
+
+- Metadata: selected home `~/.galam/endpoints.json`, mode 600; URL, protocol, model, group and variable reference only.
+- Keys: selected home `~/.secrets`, mode 600; unrelated exports/comments are preserved and values are shell-quoted as literals.
+- Updating a credential deduplicates only that assignment. Blank key input keeps the referenced credential.
+- Home selection follows the current home with `.secrets`, then an existing Termux home; `GALAM_HOME` overrides it.
+- Inputs have no persistent history; the password buffer and undo state clear on save/cancel.
+- A lock, atomic writes and rollback protect profile/secret/RC updates. Symlinked destinations are refused.
+- The running Galam process receives the credential immediately; referenced saved values reload on startup without executing the secret file.
+- A guarded source line is added to Bash/Zsh RC files when a stored credential is available. An already-open parent terminal needs `source ~/.secrets` if it needs that variable itself.
+- Matching provider hosts can reuse the group's credential variable. Other hosts receive a generated variable unless explicitly assigned.
+- Main/side tasks must finish or be cancelled before connections are edited. Built-in model IDs cannot be overwritten through this editor.
+
+## Shared action pipeline
+
+Adapters translate only at the transport boundary, after Galam adds its common messages and tool schemas. Chat Completions, Responses and native Ollama replies normalize into the same action contract. Bash permissions, file validation, edit previews, cancellation, context selection and conversation isolation retain their existing execution paths. Translation and URL detection add no inference requests.
+
+Responses uses input items, flat functions, original call IDs, function outputs, max-output tokens and stateless reasoning continuity. JSON/SSE parsing avoids duplicated final snapshots. Reasoning continuity is scoped to the originating endpoint/model/URL.
+
+Native Ollama uses `/api/chat` messages, options such as `num_predict`, object-valued function arguments and named tool results. JSON and NDJSON streams return content, provider-supplied thinking text, structured actions and prompt/evaluation token counts. Separate streamed calls receive distinct action indexes. Its reported input/output usage is counted once per request.
+
+Custom models survive local discovery refresh; per-model URLs bypass built-in hardcoded routes. Context limits remain capped by the custom model's declared limit.
+
+References: [Ollama chat API](https://docs.ollama.com/api/chat), [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling), [Responses function calling](https://developers.openai.com/api/docs/guides/function-calling).
 
 ## Verification
 
-- Custom tests cover preserved files, private permissions, literal keys, duplicate exports/source lines, blank-key reuse, profile edits, invalid URL/environment names, malformed stores, symlinks, failed-write rollback, stale parent exports, protocol conversion, response errors, final snapshots and connection-scoped continuity.
-- Both API families were exercised against a local HTTP fixture. Its returned tool request ran a harmless real Bash command, then the result returned with the same call ID.
-- A streamed Responses fixture verifies the main router returns a complete action and provider-reported usage.
-- Keyboard-driven editor checks use a 44-column, 24-row output, masked input, Ctrl+S and Escape. Confirmation prints nothing outside the UI; cancellation writes no files.
-- The existing local-manager menu test was updated for the additional section while checking original actions, cursor behavior and manager disabling.
-- **Full final suite: 261 tests passed.** Custom-connection coverage: 33 tests. Changed modules passed Python compilation. The regression suite uses local fixtures. Authorized live NVIDIA checks are recorded separately in NVIDIA_CONNECTION_CHECK.md. Real user secret and RC files were not modified for these tests; temporary homes contained all test credentials.
+The full regression suite covers existing workflows as well as private credential writes, rollback, provider references, exact URLs, model moves, response adapters and keyboard navigation. Local HTTP fixtures exercise Chat Completions, Responses and native Ollama through the router, execute harmless real Bash commands, and return results through each protocol. Ollama is tested with JSON and NDJSON replies and exact reported usage.
 
-## Numbered selection and format defaults
+Keyboard tests exercise 44- and 28-column terminals, embedded settings navigation, arrows → Tab → confirm endpoint selection, review-before-save, masked secrets and cancellation. These fixtures validate client behavior; they do not establish live compatibility or model availability for every provider.
 
-The editor no longer exposes an endpoint text field. Choose endpoint displays sorted numbers; typing a number and Enter selects it, including choices above nine. Arrow selection remains available in the list. Changing provider updates the known base URL and clears credential fields from the previous provider.
-
-Default shows the selected model's saved format when known; otherwise it uses the most common format in that endpoint catalog, with Chat Completions winning ties. This computation is local. The saved profile retains the concrete wire format and its default/override preference. Version prefixes are preserved in URLs. Complete routes and repeated suffixes are normalized before appending exactly one route. Ollama native `/api/chat` and known `/api` bases resolve to its compatible `/v1` interface, including saved malformed double-appended routes.
-
-Blank credential references reuse a group's variable only when the target host matches the group's host. A different host receives a generated variable. No credential value appears in the model catalog or form confirmation.
+Final regression result: **265 tests passed**, including the new settings/native-Ollama coverage. Changed modules compiled successfully.

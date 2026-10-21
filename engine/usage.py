@@ -46,6 +46,8 @@ def capture(response,data):
     nested = [data.get(name) for name in ('x_groq','response','message')]
     usage = (data.get('usageMetadata') or data.get('usage') or delta.get('usage') or
              next((value.get('usage') for value in nested if isinstance(value,dict) and value.get('usage')),None))
+    if not isinstance(usage,dict) and ('prompt_eval_count' in data or 'eval_count' in data):
+        usage={'input_tokens':data.get('prompt_eval_count'),'output_tokens':data.get('eval_count')}
     if not isinstance(usage,dict):
         return
     if 'tokens' in usage:

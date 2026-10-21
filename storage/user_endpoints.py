@@ -8,11 +8,11 @@ from pathlib import Path
 import re
 import shlex
 import stat
-from urllib.parse import urlsplit,urlunsplit
+from urllib.parse import urlsplit
 
 from engine.result_store import atomic_bytes
 
-FORMATS={'chat_completions':'chat/completions','responses':'responses'}
+FORMATS={'chat_completions':'chat/completions','responses':'responses','ollama':'api/chat'}
 
 
 def endpoint_choices():
@@ -48,32 +48,38 @@ def profile_path():return user_home()/'.galam'/'endpoints.json'
 
 
 def normalize_url(value,api_format):
-    if api_format not in FORMATS:raise ValueError('Choose Chat Completions or Responses.')
+    if api_format not in FORMATS:raise ValueError('Choose Chat Completions, Responses or Ollama Chat.')
     value=str(value).strip()
     if any(char.isspace() or ord(char)<32 for char in value):raise ValueError('URL cannot contain whitespace.')
     try:
         parsed=urlsplit(value)
-        port=parsed.port
+        parsed.port  # Validate an explicitly supplied port without changing the URL.
     except ValueError:raise ValueError('Enter a valid HTTP(S) URL.') from None
     if parsed.scheme not in ('http','https') or not parsed.hostname:
         raise ValueError('URL must start with http:// or https://.')
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError('Keep credentials, queries and fragments out of the URL.')
-    path=parsed.path.rstrip('/')
-    # Accept a service root, /v1 base, or a complete route, without doubling /v1.
-    while True:
-        suffix=next((s for s in ('/chat/completions','/responses','/response') if path.endswith(s)),None)
-        if not suffix:break
-        path=path[:-len(suffix)]
-    # Ollama's native /api routes are a different wire format. Its compatible
-    # interface is /v1, including previously saved double-appended routes.
-    for suffix in ('/api/chat','/api/generate'):
-        if path.endswith(suffix):path=path[:-len(suffix)]+'/v1';break
-    if path.endswith('/api') and (parsed.hostname=='ollama.com' or port==11434):path=path[:-4]+'/v1'
-    if not path:path='/v1'
-    if path.endswith(('/embeddings','/models','/messages')):
-        raise ValueError('Use a chat API base URL, not models, embeddings or messages.')
-    return urlunsplit((parsed.scheme,parsed.netloc,path+'/'+FORMATS[api_format],'',''))
+    if parsed.path.rstrip('/').endswith(('/embeddings','/models','/messages')):
+        raise ValueError('Enter a chat request URL, not models, embeddings or messages.')
+    return value
+
+
+def infer_api_format(url,endpoint='',model=''):
+    path=urlsplit(str(url).strip()).path.rstrip('/')
+    if path.endswith('/api/chat'):return 'ollama'
+    if path.endswith(('/responses','/response')):return 'responses'
+    if path.endswith('/chat/completions'):return 'chat_completions'
+    return default_api_format(endpoint,model)
+
+
+def suggested_url(endpoint):
+    """Visible prefill only. Never use this to rewrite an entered URL."""
+    from storage.endpoints import ENDPOINT_REGISTRY
+    base=ENDPOINT_REGISTRY.get(endpoint,{}).get('base_url','')
+    if not base.startswith(('http://','https://')) or '{' in base:return ''
+    path=urlsplit(base).path.rstrip('/')
+    if path.endswith(('/chat/completions','/responses','/api/chat')):return base
+    return base.rstrip('/')+'/'+FORMATS[default_api_format(endpoint)]
 
 
 def default_key_env(endpoint,url):
@@ -91,8 +97,8 @@ def validate_profile(data):
         raise ValueError('Model ID must contain 1–240 characters without spaces.')
     api_format=data.get('api_format','default')
     mode=data.get('api_format_mode',api_format)
-    if api_format=='default':api_format=default_api_format(endpoint,model)
-    if mode not in ('default',*FORMATS):raise ValueError('Choose Default, Chat Completions or Responses.')
+    if api_format=='default':api_format=infer_api_format(data.get('url',''),endpoint,model)
+    if mode not in ('default',*FORMATS):raise ValueError('Choose Default, Chat Completions, Responses or Ollama Chat.')
     url=normalize_url(data.get('url',''),api_format)
     env=str(data.get('api_key_env','')).strip().removeprefix('$')
     if not env:
@@ -125,7 +131,7 @@ def read_profiles():
 
 def apply_profiles(registry,profiles):
     for profile in profiles:
-        base=profile['url'][:-len('/'+FORMATS[profile['api_format']])]
+        base=profile['url'].rsplit('/',1)[0]
         endpoint=registry.setdefault(profile['endpoint'],{'base_url':base,
                                                         'models':{},'user_defined':True})
         if endpoint.get('user_defined'):

@@ -269,7 +269,7 @@ class TuningAndMenuTests(LocalWorkspace):
             self.assertEqual(menu.screen, "local_result")
             self.assertTrue(any("llama-server" in row["label"] for row in menu.local_screens.rows))
 
-    def test_new_screens_use_existing_scroll_and_height(self):
+    def test_local_screens_fit_responsive_menu_and_include_final_item(self):
         from config import CONFIG
         from ui.settings_menu import InlineSettingsApp
         cfg = {**self.config, "local_models": [dict(self.profile, name="profile" + str(i)) for i in range(12)]}
@@ -277,8 +277,10 @@ class TuningAndMenuTests(LocalWorkspace):
             menu = InlineSettingsApp()
             menu.screen = "local"
             menu.cursor_idx = len(menu._get_items()) - 1
-            shown = "".join(text for _, text in menu.get_formatted_text())
-            self.assertEqual(shown.count("\n"), 10)
+            with patch("ui.settings_menu.get_app") as current:
+                current.return_value.output.get_size.return_value = Mock(rows=24, columns=44)
+                shown = "".join(text for _, text in menu.get_formatted_text())
+            self.assertLessEqual(shown.count("\n"), 12)
             self.assertIn("Back to Settings", shown)
             self.assertNotIn("profile0", shown)
 

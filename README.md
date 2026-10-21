@@ -113,17 +113,20 @@ Restart Galam after updating. Commit or set aside your own source changes before
 
 ### Add a model or custom endpoint in settings
 
-Open **`/settings` → Model Connections**. A separate editor opens, then returns to your existing settings screen.
+Settings now opens a full-screen workspace with colored panels for the active connection, menu, status and navigation. All existing execution, fallback, streaming and local-model controls remain available.
 
-1. Open **Choose endpoint**, select from the sorted, numbered list, then enter its number and press **Enter**. Endpoint names are selected rather than typed. For a new compatible service, choose a group such as **Direct** and supply its URL.
-2. Enter the provider's exact **model ID**.
-3. Review the provider base URL filled by your selection, or paste a custom base/full URL. Changing provider clears the previous credential fields to avoid carrying a key to another service.
-4. Leave **Default: [format]** selected for the usual connection. It displays the model's known format, or the endpoint's most common catalog format, plus the resolved route. Use **Override: Chat Completions** or **Override: Responses** only when needed. API version prefixes such as `/v2` remain part of the URL. Responses is plural; a pasted `/v1/response` is corrected. Complete URLs select Default when they match it, or the appropriate override.
-5. Enter a credential variable name, or leave it blank. Matching provider hosts reuse the group's credential reference; other hosts get a generated reference. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
-6. Enter the **masked API key**. A blank field keeps an existing referenced key; a service requiring no key can leave it empty. Set the model's context window to its supported limit.
-7. Choose whether to **use this model now**, then save with the button or **Ctrl+S**.
+Open **`/settings` → Model Connections**. A four-step wizard opens inside the same settings application:
 
-**Tab / Shift+Tab** moves between fields; arrows and Space select the API format; **Esc** cancels. **Saved models** loads a previously added connection for editing. Save feedback stays inside the editor, with no key value or overlapping printed confirmation. Connection changes are blocked during active main/side tasks.
+1. **Model:** choose an endpoint group from the sorted numbered picker, then enter the exact model ID. Arrows update the selected value immediately; you can also type a number and press Enter. Use **Saved models** to edit a custom connection.
+2. **Request:** enter the **complete request URL**. **Default sends this exact URL unchanged**. It detects the payload format from familiar routes, including `/api/chat` (native Ollama), `/chat/completions`, and `/responses`; unknown paths use the model/group catalog preference. Explicit Chat Completions, Responses and Ollama Chat choices change the request body, never the URL. Use the provider's documented route: Responses is normally plural `/v1/responses`, but Galam will not silently correct a typed URL.
+3. **Credentials:** enter a variable name or leave it automatic, enter a masked key if needed, set the context window, and choose whether to activate the model. Blank keys keep the referenced credential. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
+4. **Review:** check the endpoint group, model, exact URL, payload format and credential reference before saving. The credential value is never displayed.
+
+A provider choice offers a full request URL only when the URL field is empty or still contains an untouched suggestion. A manually entered URL stays in place when moving the model to another group. Changing an automatic suggestion to a different host clears the previous credential inputs.
+
+**Tab / Shift+Tab** moves between controls; **Ctrl+S** advances to the next step and saves only from Review. **Esc** goes back a step; at the first step it returns to settings. **Cancel** discards the form. Save feedback stays inside the editor. Connection changes are blocked during active main/side tasks.
+
+Native Ollama chat supports JSON and NDJSON streaming, structured Bash/file actions, native tool results, thinking text supplied by the provider, and its reported prompt/evaluation token counts. Existing Chat Completions and Responses connections retain Galam's common action pipeline.
 
 Custom definitions live in **`~/.galam/endpoints.json`** and contain only routing metadata and credential variable names. Keys entered here go only into **`~/.secrets`**, written privately with mode `600`. Existing exports and comments are preserved; updating a variable avoids duplicate assignments. The selected home follows an existing Termux `~/.secrets` when Galam runs through an alternate home, and `GALAM_HOME` can explicitly select a home directory.
 
@@ -447,7 +450,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 261 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise both API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 265 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|

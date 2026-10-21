@@ -6,6 +6,9 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Added
 
+- Colored full-screen settings panels and an embedded four-step model connection wizard with review before save.
+- Native Ollama `/api/chat` requests, NDJSON/JSON replies, structured action round trips and provider token accounting.
+
 - Settings → Model Connections: add/edit a model, assign an endpoint group, choose Chat Completions or Responses, enter a masked API key and optionally activate immediately.
 - Home-owned `~/.galam/endpoints.json` for connection metadata; keys are saved only to `~/.secrets` with private permissions, literal shell quoting and preserved existing exports/comments.
 - Immediate credential application in Galam, startup credential reload and a deduplicated guarded Bash/Zsh source line for future terminals.
@@ -26,10 +29,10 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Improved
 
-- Endpoint assignment uses a sorted numbered list with number+Enter selection, including multi-digit choices. Provider changes prefill their base URL and clear old credential form fields.
-- API format defaults to the selected model's known format or the most common endpoint format, with the resolved route shown and explicit overrides still available.
+- Endpoint assignment follows the highlighted row, fixing stale checked values that could save Direct selections under Groq. Numbers remain available, including multi-digit choices.
+- Default preserves the exact entered request URL. Payload inference is local; explicit format choices also leave the destination unchanged. Typed URLs survive endpoint-group changes.
 - Matching provider hosts can reuse the endpoint credential variable without typing it; unrelated hosts receive separate references.
-- Existing Ollama native/doubled routes normalize to the compatible `/v1` interface instead of becoming `/api/chat/chat/completions`.
+- Removed automatic route rewriting, including the unwanted conversion of Ollama native `/api/chat` URLs to `/v1/chat/completions`. Provider URL suggestions are shown only for empty or untouched fields.
 - Credential lookup initializes the secret loader before checking environment aliases, including standalone diagnostics.
 - Explicit daily/account quota errors stop redundant same-account model fallback; ordinary temporary model limits remain distinct.
 - Removed the built-in NVIDIA Kimi K3 entry after a live HTTP 410 response; HTTP 410 errors now identify an unavailable/retired model.
