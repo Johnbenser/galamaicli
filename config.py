@@ -160,6 +160,7 @@ DEFAULT_VALUES = {
     "task_request_limit": 128,
     "task_token_limit": 120000,
     "task_time_limit_seconds": 1800,
+    "server_startup_timeout": 30,
     "timeout": 60,
     "auto_execute": False
 }

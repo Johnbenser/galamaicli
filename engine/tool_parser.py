@@ -290,7 +290,8 @@ def _validate_and_normalize_tool(fn_name: str, args: Any):
                 cmd = sub.get("command") or sub.get("cmd") or cmd
         if not str(cmd).strip():
             return None
-        args_dict = {"command": str(cmd).strip()}
+        args_dict = {"command": str(cmd).strip(), **{key: args_dict[key] for key in
+                     ('reason', 'background', 'readiness_url') if key in args_dict}}
 
     elif target_fn == "manage_tasks":
         action = args_dict.get("action") or "list"

@@ -4,6 +4,16 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Launch workflow repair
+
+- Replaced aggregate task-fact middle-truncation with complete selected launch evidence, source/cwd references and migration of older saved facts. Small recent targeted tool answers are preserved through the next decision.
+- Replaced novel-output renewal for known startup recipes with milestone-based recovery. Recovery includes the retained command; unrelated file reads and formatted listings cannot keep extending startup indefinitely.
+- Replaced the old server-launch block with one owned-process runner for recognized commands and explicit background execution. Custom commands support local HTTP(S)/TCP readiness, log URL discovery, pending-startup tracking and cancellable local polling without extra AI calls.
+- A pending-readiness retry reuses the same owned process. Unrelated healthy services do not establish success; authentication responses and unverified readiness are reported separately.
+- Preserved background/readiness arguments through native, optional graph and text tool paths. Added conservative adjacent-verb spelling correction while retaining question/negation guards.
+- Removed a remaining `manage_tasks` fallback that could terminate an external PID after an owned-task lookup failed.
+- Added regressions that fail on the old implementation, adaptive final-context launch verification and real temporary service tests. Added a realistic coding stress plan; live-model completion and token savings remain unmeasured.
+
 ### Added
 
 - Productive tasks continue through renewable work windows; the old iteration setting no longer ends useful work at eight or 25 steps. Conversation checkpoints preserve evidence and cumulative request/token/time allowances across `continue`.

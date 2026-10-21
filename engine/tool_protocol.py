@@ -6,7 +6,7 @@ from engine.tool_registry import TOOLS, REQUIRED
 _UNSUPPORTED = set()
 DESCRIPTIONS = {
     "make_directory": "Create a directory and its parents. Never use write_file for folders.",
-    "execute_bash": "Run a real shell command after review.",
+    "execute_bash": "Run a real shell command after review. For any long-running service use background=true; readiness_url may specify a local HTTP(S)/TCP probe. Do not relaunch a live process just because readiness is pending.",
     "view_file": "Read numbered file lines before editing.",
     "write_file": "Create a file with complete literal content.",
     "replace_file_content": "Replace a unique inspected block; preserve other code.",

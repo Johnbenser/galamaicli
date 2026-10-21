@@ -9,6 +9,8 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
     rows = copy.deepcopy(rows)
     mandatory = set(mandatory)
     changed = set()
+    latest_call = max((i for i, row in enumerate(rows) if row.get('tool_calls')), default=-1)
+    recent = set(range(latest_call, len(rows))) if latest_call >= 0 else {len(rows)-1}
 
     def cost():
         return sum(estimate(rows[i]) + 8 for i in mandatory)
@@ -34,7 +36,9 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
             row = rows[i]
             original = originals[i]
             text = str(original.get('content', ''))
-            if len(text) > limit + 300:
+            # A targeted small answer must survive the next decision intact,
+            # even when returned beside a much larger source-file observation.
+            if len(text) > limit + 300 and not (i in recent and len(text) <= 1200):
                 row['content'] = preview(text, limit, original)
                 changed.add(i)
             calls = original.get('tool_calls')

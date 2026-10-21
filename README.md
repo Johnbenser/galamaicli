@@ -312,11 +312,17 @@ Switch with `/mode review`, `/mode auto`, or `/mode always-proceed`. These are e
 
 ### Continuing difficult tasks
 
-`max_iterations` now sets a work checkpoint window rather than ending a task after a fixed number of steps. Galam can continue productive tasks beyond eight or 25 model turns. It retains compact evidence within the conversation, reuses unchanged exact file reads, and attempts recovery when repeated work produces no new evidence. Four consecutive rounds without new evidence stop with an honest, saved checkpoint after a recovery prompt.
+`max_iterations` now sets a work checkpoint window rather than ending a task after a fixed number of steps. Galam can continue productive tasks beyond eight or 25 model turns. It retains compact evidence within the conversation, reuses unchanged exact file reads, and attempts recovery when repeated work produces no new evidence. Once a startup recipe is known, unrelated novel output cannot renew the task indefinitely; recovery pins the complete launch command and next action. Stalled work stops with an honest, saved checkpoint after recovery.
 
 Independent cumulative task allowances prevent runaway spending: **128 provider requests, approximately 120,000 tokens, or 1,800 seconds of active task time**, whichever is reached first. Provider-reported usage is used when available; otherwise the guard uses estimates. These are application safeguards, not a guarantee of a provider bill or cost. The next request reserves estimated input and configured output before sending. Tool verification does not spend a model-turn allowance. Time checks happen between operations; they do not preempt an in-flight operation.
 
 Use `/budget` to inspect allowances, or explicitly extend one with `/budget tokens 240000`, `/budget requests 256`, or `/budget seconds 3600`. Then `continue` resumes the saved task with its accumulated spend. Starting a different task creates a fresh allowance. Checkpoint creation, duplicate detection and `/budget` make no AI requests. Compact evidence is pinned when context needs compaction, rather than duplicated into every short prompt.
+
+### Running project services
+
+Common launch commands and explicit `execute_bash(background=true)` calls share one process runner. Custom scripts and Make targets do not need a filename/framework whitelist. An optional local `readiness_url` supports HTTP(S) or TCP probes; otherwise the runner uses an evidenced port or a local URL announced in the process log. Unknown readiness stays unknown. It never adopts an unrelated healthy service as proof that this project started.
+
+Processes are tracked immediately after spawn. A readiness timeout retains the live process and its private log, and retrying the same command/directory rechecks it rather than starting another copy. Startup polling is local and cancellable. `server_startup_timeout` defaults to 30 seconds (bounded at 120); an authentication response is distinguished from a successful health check. No model call is needed to poll readiness. Complete startup facts and small targeted recent answers survive compaction.
 
 ### Security and user identity
 
@@ -472,11 +478,13 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 312 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting, productive work beyond 25 rounds, repetition recovery, cumulative allowances and security checks. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Scripted model tests are distinct from live endpoint compatibility; the progress/security update required no paid/live API requests.
+**Latest recorded local result: 325 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting, productive work beyond 25 rounds, repetition recovery, cumulative allowances and security checks. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Scripted model tests are distinct from live endpoint compatibility; the progress/security update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
 | [Changelog](CHANGELOG.md) | Consolidated improvements and bug fixes |
+| [Launch repair](artifacts/LAUNCH_WORKFLOW_REPAIR.md) | Replaced failed command compaction/recovery and unified process execution |
+| [Coding stress plan](artifacts/VIBE_CODING_STRESS_PLAN.md) | Realistic multi-turn scenarios, independent acceptance and bounded live pilot |
 | [Progress and security](artifacts/PROGRESS_SECURITY.md) | Renewable work, task spending, audit checks and user identity |
 | [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |
 | [Pipeline upgrade](artifacts/PIPELINE_UPGRADE_NOTES.md) | Parsing, validation, action results and recovery |

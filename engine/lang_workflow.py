@@ -19,7 +19,7 @@ class PlanningState(TypedDict, total=False):
 def _typed_tools():
     from langchain_core.tools import StructuredTool
 
-    def execute_bash(command: str, reason: str = "") -> str:
+    def execute_bash(command: str, reason: str = "", background: bool = False, readiness_url: str = "") -> str:
         """Run a command after Galam checks its path and execution policy."""
         return command
 

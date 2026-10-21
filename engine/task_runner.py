@@ -60,7 +60,7 @@ class TaskManager:
             self.tasks.append(entry)
         return entry
 
-    def stop_task(self, target) -> bool:
+    def stop_task(self, target, pid_only=False) -> bool:
         target_str = str(target).lower().strip()
         with self._lock:
             for t in list(self.tasks):
@@ -73,6 +73,8 @@ class TaskManager:
                     (target_str in ("py", "python") and any(k in str(t.get("full_cmd", "")).lower() for k in ("python", "python3", "py "))) or
                     (target_str in ("react", "vite", "next", "node") and any(k in str(t.get("full_cmd", "")).lower() for k in ("node", "vite", "next", "npm", "yarn", "bun", "pnpm")))
                 )
+                if pid_only:
+                    match = str(t.get('pid')) == target_str
                 if match and t.get("process") is not None and t["process"].poll() is None:
                     proc = t.get("process")
                     pid = t.get("pid")
@@ -284,7 +286,8 @@ def _execute_tool_call_legacy(tool_name: str, args: Dict[str, Any], invoking_mod
                 else:
                     lines = ["Active Background Tasks in Galam.ai:"]
                     for t in tasks:
-                        lines.append(f"  - [Task ID {t['id']}] PID {t['pid']} · Command: `{t['cmd']}` (Port: {t.get('port', '5500')})")
+                        lines.append(f"  - [Task ID {t['id']}] PID {t['pid']} · Command: `{t['cmd']}` "
+                                     f"(Port: {t.get('port') or 'unknown'}; state: {t.get('state', 'running')}; log: {t.get('log_path', 'unavailable')})")
                     out = "\n".join(lines)
             elif action in ("stop", "kill", "terminate"):
                 if target.lower() in ("all", "*"):
@@ -296,13 +299,9 @@ def _execute_tool_call_legacy(tool_name: str, args: Dict[str, Any], invoking_mod
                     if ok:
                         out = f"Successfully stopped background task {target}."
                     else:
-                        try:
-                            os.kill(int(target), signal.SIGTERM)
-                            out = f"Successfully sent SIGTERM to external process PID {target}."
-                        except Exception:
-                            out = f"Task/PID {target} not found in Galam.ai active tasks or already stopped."
-                            success = False
-                            exit_code = 1
+                        out = f"Task/PID {target} not found in Galam.ai active tasks or already stopped. Unowned processes are not terminated."
+                        success = False
+                        exit_code = 1
             else:
                 out = f"Unknown manage_tasks action: '{action}'"
                 success = False
@@ -377,8 +376,12 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
         if tool_name == 'security_audit':
             result = ActionResult(audit_project(resolve_session_path(args.get('directory', '.'))), verified=True)
         elif tool_name == "execute_bash":
-            result = as_result(execute_shell_action(args["command"], allow_credentials=True)
-                               if credential_access else execute_shell_action(args["command"]))
+            if args.get('background'):
+                result = as_result(execute_shell_action(args['command'], allow_credentials=credential_access,
+                    background=True, readiness_url=args.get('readiness_url', '')))
+            else:
+                result = as_result(execute_shell_action(args["command"], allow_credentials=True)
+                                   if credential_access else execute_shell_action(args["command"]))
         elif tool_name == "make_directory":
             path = resolve_session_path(args["path"])
             existed = os.path.isdir(path)
@@ -680,11 +683,11 @@ def _prepare_navigation(command: str):
     return replacement + command[match.end():], target
 
 
-def execute_shell_action(cmd: str, allow_credentials=False):
-    return store_result(as_result(_execute_shell_action_legacy(cmd, allow_credentials)))
+def execute_shell_action(cmd: str, allow_credentials=False, background=False, readiness_url=''):
+    return store_result(as_result(_execute_shell_action_legacy(cmd, allow_credentials, background, readiness_url)))
 
 
-def _execute_shell_action_legacy(cmd: str, allow_credentials=False) -> Tuple[str, bool]:
+def _execute_shell_action_legacy(cmd: str, allow_credentials=False, background=False, readiness_url='') -> Tuple[str, bool]:
     clean_cmd = cmd.strip()
     if not clean_cmd:
         return "", False
@@ -721,278 +724,127 @@ def _execute_shell_action_legacy(cmd: str, allow_credentials=False) -> Tuple[str
         from engine.security import public_environment
         sub_env = public_environment(sub_env)
 
-    if GLOBAL_TASK_MANAGER.is_server_command(clean_cmd):
-        disp_cmd, port = GLOBAL_TASK_MANAGER.extract_server_target(clean_cmd)
-        bg_cmd = re.sub(r'\s*&\s*$', '', clean_cmd).strip()
-
-        # Detect working directory hint (e.g. if command mentions a folder like /sdcard/cli/jbnsrr-portfolio)
+    if background or GLOBAL_TASK_MANAGER.is_server_command(clean_cmd):
+        from engine.process_runner import launch_process
+        from config import CONFIG
         server_cwd = navigation_target or run_cwd
-        path_in_cmd = re.search(r'(/[\w\.\-/]+)', clean_cmd)
-        if path_in_cmd:
-            cand_p = path_in_cmd.group(1).rstrip("/")
-            if os.path.isdir(cand_p):
-                server_cwd = cand_p
-            elif clean_cmd.startswith("cd ") or clean_cmd.startswith("cd -- "):
-                parent = os.path.dirname(cand_p)
-                suggestions = []
-                if os.path.isdir(parent):
-                    names = [name for name in os.listdir(parent)
-                             if os.path.isdir(os.path.join(parent, name))]
-                    suggestions = difflib.get_close_matches(os.path.basename(cand_p), names, n=3, cutoff=0.5)
-                hint = (" Nearby directories: " + ", ".join(os.path.join(parent, name) for name in suggestions)
-                        if suggestions else "")
-                return f"[Error: Working directory does not exist: {cand_p}.{hint}]", False
+        result = launch_process(re.sub(r'\s*&\s*$', '', clean_cmd).strip(), server_cwd, sub_env,
+            GLOBAL_TASK_MANAGER, readiness_url=readiness_url,
+            timeout=CONFIG.get('server_startup_timeout', 30))
+        if navigation_target and result.is_background:
+            AGENT_STATE['working_directory'] = navigation_target
+        if result.success and result.metadata.get('url'):
+            actual_port = str(urllib.parse.urlsplit(result.metadata['url']).port or '')
+            print_server_card(clean_cmd, actual_port, result.metadata['pid'])
+        return result
 
-        # Resolve nested package scripts and PORT defaults from the actual runner.
-        # Explicit command-line ports retain precedence over package defaults.
-        from engine.server_commands import configured_port
-        try:
-            with open(os.path.join(server_cwd,'package.json'),encoding='utf-8') as package_file:
-                scripts=json.load(package_file).get('scripts',{})
-        except (OSError,ValueError,TypeError):scripts={}
-        port=configured_port(clean_cmd,scripts,sub_env) or port
+    is_curl_cmd = clean_cmd.strip().startswith("curl ")
 
-        # Python entrypoints often declare a default port inside argparse or app.run.
-        if port == "5500" and server_cwd:
-            script_match = re.search(r'\bpython(?:3(?:\.\d+)?)?\s+([^\s;&|]+\.py)(?=\s|$)', clean_cmd)
-            if script_match:
-                script = script_match.group(1).strip("'\"")
-                script_path = script if os.path.isabs(script) else os.path.join(server_cwd, script)
-                try:
-                    with open(script_path, encoding="utf-8", errors="replace") as source_file:
-                        source = source_file.read(50000)
-                    declared = re.search(r'add_argument\(\s*["\']--port["\'][^\n]*?default\s*=\s*(\d{3,5})', source)
-                    if not declared:
-                        declared = re.search(r'\b(?:app\.run|serve|HTTPServer)\b[^\n]*?\bport\s*=\s*(\d{3,5})', source)
-                    if declared:
-                        port = declared.group(1)
-                except OSError:
-                    pass
+    try:
+        res = cancellable_run(
+            clean_cmd,
+            shell=True,
+            cwd=run_cwd,
+            env=sub_env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120
+        )
+        out = res.stdout or ""
+        result_returncode = res.returncode
+        if navigation_target and result_returncode == 0:
+            AGENT_STATE["working_directory"] = navigation_target
+            out = f"[Working directory: {navigation_target}]" + (f"\n{out}" if out.strip() else "")
 
-        # Step A: Pre-flight port check after the working directory and port are known.
-        port_num = int(port) if port.isdigit() else 5500
-        if GLOBAL_TASK_MANAGER.is_port_in_use(port_num):
+        # Check for curl missing or failing in Termux: fallback to Python curl
+        if is_curl_cmd and (res.returncode != 0 or not out.strip() or any(err in out.lower() for err in ("command not found", "not found", "curl: (", "curl: error"))):
+            py_curl_res = parse_and_run_curl_command(clean_cmd, env=sub_env)
+            if py_curl_res is not None:
+                c_body, c_error = py_curl_res
+                if c_body and not c_error and not c_body.startswith("[Python Curl Error"):
+                    out = f"[Executed via Python Curl (urllib)]:\n{c_body}"
+                    result_returncode = 0
+                elif res.returncode != 0:
+                    out = c_body
+                if c_error:
+                    result_returncode = result_returncode or 1
+
+        # Android symlink tolerance: Auto-retry find with -L on /sdcard symlink
+        if not out.strip() and "find " in clean_cmd and "/sdcard" in clean_cmd and " -L " not in clean_cmd:
             try:
-                _, existing_status = python_curl(f"http://127.0.0.1:{port}", timeout=2)
-                if 200 <= existing_status < 400:
-                    if navigation_target:
-                        AGENT_STATE["working_directory"] = navigation_target
-                    return f"[Server already running at http://127.0.0.1:{port} (HTTP {existing_status} verified)]", True
-            except Exception:
-                pass
-            return f"[Error: Port {port} is occupied by another process; existing service did not pass HTTP health check]", False
-
-        # Redirect background server stdout and stderr to persistent task log to avoid Linux 64KB pipe buffer deadlock and SIGPIPE
-        server_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs", "tasks")
-        os.makedirs(server_log_dir, exist_ok=True)
-        server_log_file = os.path.abspath(os.path.join(server_log_dir, f"server_{port}_{uuid.uuid4().hex[:10]}.log"))
-        log_out = open(server_log_file, "a", encoding="utf-8", errors="replace")
-
-        try:
-            proc = subprocess.Popen(
-                bg_cmd,
-                shell=True,
-                cwd=server_cwd,
-                env=sub_env,
-                stdout=log_out,
-                stderr=subprocess.STDOUT,
-                text=True,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None
-            )
-
-            # Step B: Immediate health check to guarantee the process did not die on launch
-            time.sleep(0.5)
-            ret_code = proc.poll()
-            if ret_code is not None:
-                # Process terminated immediately
-                stderr_out = ""
-                try:
-                    with open(server_log_file, "r", encoding="utf-8", errors="replace") as lf:
-                        lines = lf.readlines()
-                        stderr_out = "".join(lines[-10:])
-                except Exception:
-                    pass
-
-                # If it failed due to address already in use, free the port and retry once
-                if "address already in use" in stderr_out.lower() or GLOBAL_TASK_MANAGER.is_port_in_use(port_num):
-                    GLOBAL_TASK_MANAGER.free_port(port_num, cmd_hint=disp_cmd)
-                    time.sleep(0.3)
-                    proc = subprocess.Popen(
-                        bg_cmd,
-                        shell=True,
-                        cwd=server_cwd,
-                        env=sub_env,
-                        stdout=log_out,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        preexec_fn=os.setsid if hasattr(os, "setsid") else None
-                    )
-                    time.sleep(0.5)
-                    ret_code = proc.poll()
-
-                if ret_code is not None:
-                    # Still failed
-                    fail_err = stderr_out.strip() or f"Exited immediately with code {ret_code}"
-                    return f"[Error: Server failed to start on port {port}: {fail_err}]", False
-
-            # Step C: Mandatory HTTP 200 OK Verification
-            # Poll localhost:<port> for up to 4.0 seconds (16 iterations x 0.25s) to guarantee server returns HTTP 200 OK
-            http_verified = False
-            http_status = None
-            for _ in range(16):
-                if proc.poll() is not None:
-                    break
-                try:
-                    _, code = python_curl(f"http://127.0.0.1:{port}", timeout=1)
-                    if code == 200 or (200 <= code < 400):
-                        http_verified = True
-                        http_status = code
-                        break
-                except Exception:
-                    pass
-                time.sleep(0.25)
-
-            if proc.poll() is not None:
-                stderr_out = ""
-                try:
-                    with open(server_log_file, "r", encoding="utf-8", errors="replace") as lf:
-                        lines = lf.readlines()
-                        stderr_out = "".join(lines[-10:])
-                except Exception:
-                    pass
-                return f"[Error: Server process exited unexpectedly during health check: {stderr_out.strip()}]", False
-
-            if not http_verified:
-                # Do NOT confirm server is running if HTTP 200 OK was not received!
-                return (
-                    f"[Error: Server PID {proc.pid} launched on port {port}, but did not return HTTP 200 OK within health check timeout. "
-                    f"Check startup errors in {server_log_file}]",
-                    False
+                fixed_cmd = clean_cmd.replace("find ", "find -L ", 1)
+                res_retry = cancellable_run(
+                    fixed_cmd,
+                    shell=True,
+                    cwd=run_cwd,
+                    env=sub_env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=120
                 )
-
-            # ONLY confirm and print card when HTTP 200 OK is verified!
-            task = GLOBAL_TASK_MANAGER.register_task(bg_cmd, proc, disp_cmd, port)
-            task['log_path'] = server_log_file
-            if navigation_target:
-                AGENT_STATE["working_directory"] = navigation_target
-            print_server_card(disp_cmd, port, proc.pid)
-            return (
-                f"[Background server started with PID {proc.pid} on port {port} "
-                f"(HTTP {http_status} OK verified at http://127.0.0.1:{port}); log: {server_log_file}]",
-                True
-            )
-        except Exception as e:
-            return f"[Failed to start server: {e}]", False
-        finally:
-            log_out.close()
-    else:
-        is_curl_cmd = clean_cmd.strip().startswith("curl ")
-
-        try:
-            res = cancellable_run(
-                clean_cmd,
-                shell=True,
-                cwd=run_cwd,
-                env=sub_env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=120
-            )
-            out = res.stdout or ""
-            result_returncode = res.returncode
-            if navigation_target and result_returncode == 0:
-                AGENT_STATE["working_directory"] = navigation_target
-                out = f"[Working directory: {navigation_target}]" + (f"\n{out}" if out.strip() else "")
-
-            # Check for curl missing or failing in Termux: fallback to Python curl
-            if is_curl_cmd and (res.returncode != 0 or not out.strip() or any(err in out.lower() for err in ("command not found", "not found", "curl: (", "curl: error"))):
-                py_curl_res = parse_and_run_curl_command(clean_cmd, env=sub_env)
-                if py_curl_res is not None:
-                    c_body, c_error = py_curl_res
-                    if c_body and not c_error and not c_body.startswith("[Python Curl Error"):
-                        out = f"[Executed via Python Curl (urllib)]:\n{c_body}"
-                        result_returncode = 0
-                    elif res.returncode != 0:
-                        out = c_body
-                    if c_error:
-                        result_returncode = result_returncode or 1
-
-            # Android symlink tolerance: Auto-retry find with -L on /sdcard symlink
-            if not out.strip() and "find " in clean_cmd and "/sdcard" in clean_cmd and " -L " not in clean_cmd:
-                try:
-                    fixed_cmd = clean_cmd.replace("find ", "find -L ", 1)
-                    res_retry = cancellable_run(
-                        fixed_cmd,
+                if res_retry.stdout and res_retry.stdout.strip():
+                    out = res_retry.stdout
+                    result_returncode = res_retry.returncode
+                elif "-type d" in clean_cmd:
+                    res_ls = cancellable_run(
+                        "ls -d /sdcard/*/ 2>/dev/null",
                         shell=True,
-                        cwd=run_cwd,
                         env=sub_env,
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        timeout=120
+                        timeout=30
                     )
-                    if res_retry.stdout and res_retry.stdout.strip():
-                        out = res_retry.stdout
-                        result_returncode = res_retry.returncode
-                    elif "-type d" in clean_cmd:
-                        res_ls = cancellable_run(
-                            "ls -d /sdcard/*/ 2>/dev/null",
-                            shell=True,
-                            env=sub_env,
-                            stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            timeout=30
-                        )
-                        if res_ls.stdout and res_ls.stdout.strip():
-                            out = res_ls.stdout
-                            result_returncode = res_ls.returncode
-                except Exception:
-                    pass
+                    if res_ls.stdout and res_ls.stdout.strip():
+                        out = res_ls.stdout
+                        result_returncode = res_ls.returncode
+            except Exception:
+                pass
 
-            # Android path tolerance: Auto-resolve paths with leading/trailing spaces if command failed
-            if res.returncode != 0 and "/sdcard" in clean_cmd:
-                try:
-                    path_matches = re.findall(r'(/sdcard/[^\s\'"|;&]+)', clean_cmd)
-                    for target_path in path_matches:
-                        p_dir = os.path.dirname(target_path)
-                        p_base = os.path.basename(target_path)
-                        if os.path.exists(p_dir):
-                            for real_entry in os.listdir(p_dir):
-                                if real_entry.strip() == p_base or real_entry.strip().lower() == p_base.lower():
-                                    if real_entry != p_base:
-                                        real_full = os.path.join(p_dir, real_entry)
-                                        fixed_cmd = clean_cmd.replace(target_path, f'"{real_full}"')
-                                        res_retry = cancellable_run(
-                                            fixed_cmd,
-                                            shell=True,
-                                            cwd=run_cwd,
-                                            env=sub_env,
-                                            stdin=subprocess.DEVNULL,
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT,
-                                            text=True,
-                                            timeout=120
+        # Android path tolerance: Auto-resolve paths with leading/trailing spaces if command failed
+        if res.returncode != 0 and "/sdcard" in clean_cmd:
+            try:
+                path_matches = re.findall(r'(/sdcard/[^\s\'"|;&]+)', clean_cmd)
+                for target_path in path_matches:
+                    p_dir = os.path.dirname(target_path)
+                    p_base = os.path.basename(target_path)
+                    if os.path.exists(p_dir):
+                        for real_entry in os.listdir(p_dir):
+                            if real_entry.strip() == p_base or real_entry.strip().lower() == p_base.lower():
+                                if real_entry != p_base:
+                                    real_full = os.path.join(p_dir, real_entry)
+                                    fixed_cmd = clean_cmd.replace(target_path, f'"{real_full}"')
+                                    res_retry = cancellable_run(
+                                        fixed_cmd,
+                                        shell=True,
+                                        cwd=run_cwd,
+                                        env=sub_env,
+                                        stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT,
+                                        text=True,
+                                        timeout=120
+                                    )
+                                    if res_retry.returncode == 0 or (res_retry.stdout and "cannot access" not in res_retry.stdout):
+                                        out = (
+                                            f"[Galam.ai Path Auto-Resolved: '{target_path}' -> '{real_full}']\n" +
+                                            (res_retry.stdout or "")
                                         )
-                                        if res_retry.returncode == 0 or (res_retry.stdout and "cannot access" not in res_retry.stdout):
-                                            out = (
-                                                f"[Galam.ai Path Auto-Resolved: '{target_path}' -> '{real_full}']\n" +
-                                                (res_retry.stdout or "")
-                                            )
-                                            result_returncode = res_retry.returncode
-                                            break
-                except Exception:
-                    pass
+                                        result_returncode = res_retry.returncode
+                                        break
+            except Exception:
+                pass
 
-            if result_returncode != 0:
-                out = f"[Exit status {result_returncode}]\n{out}"
-            return ActionResult(out, result_returncode == 0, result_returncode,
-                                status="completed" if result_returncode == 0 else "failed")
-        except subprocess.TimeoutExpired:
-            return "[Error: Command timed out after 120s]", False
-        except Exception as ex:
-            return f"[Execution Error: {ex}]", False
+        if result_returncode != 0:
+            out = f"[Exit status {result_returncode}]\n{out}"
+        return ActionResult(out, result_returncode == 0, result_returncode,
+                            status="completed" if result_returncode == 0 else "failed")
+    except subprocess.TimeoutExpired:
+        return "[Error: Command timed out after 120s]", False
+    except Exception as ex:
+        return f"[Execution Error: {ex}]", False

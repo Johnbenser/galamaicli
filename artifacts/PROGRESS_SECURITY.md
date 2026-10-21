@@ -1,5 +1,7 @@
 # Progress, recovery and local security
 
+Historical implementation notes for `f3e047a`. Its aggregate launch-fact compaction and output-novelty recovery were insufficient in a subsequent real session. See [Launch workflow repair](LAUNCH_WORKFLOW_REPAIR.md) for the replacements, regression evidence and latest verification.
+
 ## Failure addressed
 
 The audited server-start task made eight successful HTTP requests in 27.1 seconds, using 17,753 input and 1,240 output tokens (18,993 total), but never attempted a server launch. Repeated listings and archive retrieval consumed its eight-iteration allowance. Raising that allowance alone would have extended the same loop.

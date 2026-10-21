@@ -129,6 +129,19 @@ def configured_port(command,scripts=None,environment=None,seen=()):
 def server_start_requested(request):
     # Plain questions and negated instructions must not become launch requests.
     from engine.action_results import request_intent
-    if not request_intent(request)[0]:return False
-    text=re.sub(r"\b(?:do not|don't|never)\s+(?:start|run|launch|restart)\b[^.;\n]*",'',request,flags=re.I)
-    return bool(re.search(r'\b(?:start|run|launch|restart)\b[^.\n]{0,100}\bserver\b|\bserve\s+(?:my|the|this)\s+(?:app|site|project)\b',text,re.I))
+    def one_edit(a, b):
+        if a == b:return True
+        if len(a) == len(b):return sum(x != y for x,y in zip(a,b)) == 1
+        if abs(len(a)-len(b)) != 1:return False
+        short,long = (a,b) if len(a)<len(b) else (b,a)
+        return any(long[:i]+long[i+1:] == short for i in range(len(long)))
+    verbs = ('start','run','launch','restart')
+    def normalize(match):
+        word = match[1].lower()
+        verb = next((v for v in verbs if one_edit(word,v)), word)
+        return verb + match[2]
+    # Conservative adjacent-verb correction, independent of a user's spelling/path.
+    text=re.sub(r'\b(\w+)(\s+(?:(?:my|the|this|our|a|dev|development)\s+){0,3}(?:server|service)\b)',normalize,str(request),flags=re.I)
+    if not request_intent(text)[0]:return False
+    text=re.sub(r"\b(?:do not|don't|never)\s+(?:start|run|launch|restart)\b[^.;\n]*",'',text,flags=re.I)
+    return bool(re.search(r'\b(?:start|run|launch|restart)\b[^.\n]{0,100}\b(?:server|service)\b|\bserve\s+(?:my|the|this)\s+(?:app|site|project)\b',text,re.I))

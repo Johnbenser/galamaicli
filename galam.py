@@ -1060,7 +1060,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
             if has_error:
                 status_instruction = "Status: Tool step failed. Inspect the error and continue correcting the task."
             else:
-                status_instruction = ("Status: Background task launched and health checked."
+                status_instruction = (("Status: Background task launched and health checked." if action_result.verified
+                                      else "Status: Owned background process is responding; application health is not verified.")
                                       if is_bg else "Status: Tool step executed successfully with exit status 0.")
                 if tool_name in ("write_file", "replace_file_content", "undo_file_change"):
                     status_instruction = ("Status: File operation completed successfully. "

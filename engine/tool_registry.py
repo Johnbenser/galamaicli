@@ -2,7 +2,7 @@
 
 TOOLS = {
     "make_directory": {"path": str},
-    "execute_bash": {"command": str, "reason": str},
+    "execute_bash": {"command": str, "reason": str, "background": bool, "readiness_url": str},
     "view_file": {"path": str, "start_line": int, "end_line": int},
     "write_file": {"path": str, "content": str, "overwrite": bool},
     "replace_file_content": {"path": str, "target_content": str, "replacement_content": str},
