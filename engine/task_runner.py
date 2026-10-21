@@ -196,7 +196,8 @@ class TaskManager:
 
     def get_task_pill_tokens(self) -> list:
         tasks = self.get_active_tasks()
-        active_ids = {row['id'] for row in AGENT_STATE.get('active_subagents', []) if row.get('task') == 'command'}
+        active_ids = {row['id'] for row in AGENT_STATE.get('active_subagents', [])
+                      if row.get('task') == 'command' and not row.get('startup_complete')}
         tasks = [task for task in tasks if task.get('agent_id') not in active_ids]
         if not tasks:
             return []

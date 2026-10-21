@@ -23,11 +23,12 @@ class ContinuationRecallTests(fixtures.Workspace):
     def test_actual_localhost_wording_enters_startup_workflow(self):
         for request in ('Hi so can u run my web on localhost /tmp/project ?',
                         'Bring up the development preview for this app',
-                        'Please start my React app', 'Run this Python project on localhost'):
+                        'Please start my React app', 'Run this Python project on localhost',
+                        'Start the app then run checks', 'Run tests then start the server'):
             self.assertTrue(server_start_requested(request),request)
             self.assertTrue(should_delegate(request),request)
         for request in ('Explain how to run my web on localhost', 'Do not run this app on localhost',
-                        'What is a localhost server?', 'Read the server instructions'):
+                        'What is a localhost server?', 'Read the server instructions', 'Run tests for this server'):
             self.assertFalse(should_delegate(request),request)
 
     def test_native_batch_and_recovery_fit_small_window_without_mutating_history(self):

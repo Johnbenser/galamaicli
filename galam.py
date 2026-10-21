@@ -1134,9 +1134,12 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             })
             executed_in_this_step += 1
             if command_agent and command_agent.ready and not pending_checks:
-                finish_receipt(command_agent.receipt())
-                completed = True
-                return
+                command_agent.entry['startup_complete'] = True
+                from engine.completion import _atomic
+                if not code_change_requested and not contract.missing() and _atomic(current_request):
+                    finish_receipt(command_agent.receipt())
+                    completed = True
+                    return
 
             # Once every declared creation output is proven, ignore speculative extra proposals.
             receipt = contract.receipt(action_events, pending_checks)

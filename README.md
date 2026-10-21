@@ -340,6 +340,8 @@ Startup requests now enter a **Command Agent** using the same selected endpoint/
 
 Requests like “run my web on localhost /path/to/project” enter this workflow without needing the word “server.” Read-only discovery resolves the explicit project and provides actual package scripts, package-manager metadata and entrypoint candidates. The model chooses the command; React projects may use Vite, a custom Node build, Python serving or another setup. A later authorized background command can enter the worker through the same executor. Discovery never launches by itself or grants edit inspection/approval.
 
+For compound requests such as “start the app, then run checks,” startup readiness leaves the requested follow-up work active. The verified service remains visible below the input while that work continues.
+
 Build/start chains run intact. Recognized build output gets a local build allowance (`server_build_timeout`, default 180 seconds, maximum 1,800), followed by the startup allowance. Repeated phase changes cannot extend the absolute deadline. On startup failure, the worker receives compact error evidence and can inspect, repair and check the implicated source. Successful readiness produces a local receipt without an extra AI acknowledgment request. Worker requests share the parent's cumulative allowances and total-token footer; local waiting uses no model requests. Set `command_agent` to `false` in settings to restore the original action loop. See [Command Agent implementation](artifacts/COMMAND_AGENT.md) for scope and verification limits.
 
 ### Security and user identity
@@ -496,7 +498,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 362 tests passed, with no skips.** This includes productive work beyond the old request/token caps, context recovery, conditional recall, action contracts, file edits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting and security checks. Real startup tests cover build-then-Python, Python HTTP, Node, Make, Flask and Vite with a React JSX module. The recorded run supplied `GALAM_TEST_VITE` (an installed Vite entrypoint) and `GALAM_TEST_FLASK_PATH` (a Flask package directory); those two integrations skip when their fixture paths are unset. Fixtures do not add production dependencies.
+**Latest recorded local result: 363 tests passed, with no skips.** This includes productive work beyond the old request/token caps, context recovery, conditional recall, action contracts, file edits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting and security checks. Real startup tests cover build-then-Python, Python HTTP, Node, Make, Flask and Vite with a React JSX module. The recorded run supplied `GALAM_TEST_VITE` (an installed Vite entrypoint) and `GALAM_TEST_FLASK_PATH` (a Flask package directory); those two integrations skip when their fixture paths are unset. Fixtures do not add production dependencies.
 
 A separate live pilot using `minimax-m3.1-flash` on Direct Endpoint successfully served a build/Python project and a Vite project, with independent HTTP content checks. It used eight requests and 23,577 provider-reported tokens in total. This demonstrates those two cases, not universal model reliability or token savings. See the [implementation report](artifacts/CONTINUATION_RECALL_IMPLEMENTATION.md).
 

@@ -40,7 +40,7 @@ class ServerMatrixTests(fixtures.Workspace):
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0)); return sock.getsockname()[1]
 
-    def run_service(self, command, url, request=None, expect_initial_worker=True):
+    def run_service(self, command, url, request=None, expect_initial_worker=True, followup=False):
         import galam
         messages=[{'role':'user','content':request or f'Hi so can u run my web on localhost {self.root} ?'}]
         seen=[]
@@ -50,6 +50,13 @@ class ServerMatrixTests(fixtures.Workspace):
             if expect_initial_worker:
                 self.assertIn(str(self.root),str(history))
                 self.assertIn('Startup metadata',str(history))
+            if followup and len(seen)==2:
+                check=f'import urllib.request; r=urllib.request.urlopen({url!r},timeout=3); assert r.status==200; print("FOLLOWUP_CHECK_OK")'
+                return AgentResponse(tool_calls=[{'id':'check','type':'function','function':{
+                    'name':'execute_bash','arguments':json.dumps({'command':f'{shlex.quote(sys.executable)} -c {shlex.quote(check)}'})}}]),'fixture'
+            if followup and len(seen)==3:
+                self.assertIn('FOLLOWUP_CHECK_OK',str(history))
+                return AgentResponse(content='Startup and the follow-up HTTP check completed.'),'fixture'
             return AgentResponse(tool_calls=[{'id':'start','type':'function','function':{
                 'name':'execute_bash','arguments':json.dumps({'command':command,'background':True,'readiness_url':url})}}]),'fixture'
         with contextlib.ExitStack() as stack:
@@ -61,7 +68,7 @@ class ServerMatrixTests(fixtures.Workspace):
                 stack.enter_context(patch.object(galam,name,return_value=''))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             galam.run_agent_loop(messages,'matrix',max_steps=1)
-        self.assertEqual(query.call_count,1)
+        self.assertEqual(query.call_count,3 if followup else 1)
         self.assertEqual(AGENT_STATE['task_outcome'],'completed')
         self.assertFalse(AGENT_STATE.get('waiting_for_command_agent'))
         self.assertIsNone(active_agent())
@@ -82,6 +89,13 @@ class ServerMatrixTests(fixtures.Workspace):
         port=self.port();(self.root/'index.html').write_text('PYTHON_MATRIX')
         body=self.run_service(f'{shlex.quote(sys.executable)} -u -m http.server {port} --bind 127.0.0.1',f'http://127.0.0.1:{port}/')
         self.assertEqual(body,'PYTHON_MATRIX')
+
+    def test_ready_server_does_not_skip_separately_requested_checks(self):
+        port=self.port();(self.root/'index.html').write_text('FOLLOWUP_MATRIX')
+        body=self.run_service(f'{shlex.quote(sys.executable)} -u -m http.server {port} --bind 127.0.0.1',
+            f'http://127.0.0.1:{port}/',request=f'Run my web on localhost {self.root} then run checks',followup=True)
+        self.assertEqual(body,'FOLLOWUP_MATRIX')
+        self.assertEqual(len(self.manager.tasks),1)
 
     def test_custom_make_command_gets_late_worker_handoff(self):
         if not shutil.which('make'):self.skipTest('make is not installed')

@@ -144,8 +144,9 @@ def server_start_requested(request):
     text=re.sub(r'\b(\w+)(\s+(?:(?:my|the|this|our|a|dev|development)\s+){0,3}(?:server|service)\b)',normalize,str(request),flags=re.I)
     if not request_intent(text)[0]:return False
     text=re.sub(r"\b(?:do not|don't|never)\s+(?:start|run|launch|restart|serve|bring\s+up)\b[^.;\n]*",'',text,flags=re.I)
-    if re.search(r'\b(?:run|execute)\s+(?:the\s+)?(?:tests?|lint|checks?)\b', text, re.I):
-        return False
+    # A test-only clause is not startup, but must not hide an explicit launch
+    # elsewhere in a compound request ("start the app, then run checks").
+    text = re.sub(r'\b(?:run|execute)\s+(?:the\s+)?(?:tests?|lint|checks?)\b(?:(?!\b(?:and|then)\b)[^.;\n])*', '', text, flags=re.I)
     return bool(re.search(
         r'\b(?:start|run|launch|restart|bring\s+up)\b[^\n]{0,140}\b(?:server|service|web|website|site|app|preview)\b|'
         r'\b(?:start|run|launch|restart)\b[^\n]{0,140}\blocalhost\b|'

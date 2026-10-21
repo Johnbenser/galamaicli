@@ -28,6 +28,7 @@ flowchart TD
 - `engine/startup_discovery.py` resolves the explicit existing project and exposes actual package scripts and relevant entrypoint filenames. Missing paths are not created. Manifest reads honor credential-path/symlink protection and redact data. Discovery neither launches a process nor grants edit inspection/approval.
 - The selected model chooses the startup command from project evidence. Vite/React, custom build/Python serving, framework applications and arbitrary explicit background commands use the same owned-process runner. An authorized command can enter the worker later in the action loop.
 - Local waiting, PID/log tracking, port-conflict handling, duplicate-launch prevention and cancellation retain the existing process runner. Unverified readiness stays unverified. The parent does not run competing actions or make a separate readiness acknowledgment model request.
+- Compound startup requests retain their follow-up work. A ready service cannot fast-complete separately requested edits/checks, and the service pill stays visible while the worker finishes them. Test-only clauses are excluded from startup detection without hiding an explicit launch elsewhere in the same request.
 
 ### Context and recall
 
@@ -50,12 +51,12 @@ flowchart TD
 
 ## Verification
 
-**Final regression gate: 362 tests passed in 47.442 seconds, no skips.** The test runner isolated logs and restored existing configuration files after the run.
+**Final regression gate: 363 tests passed in 45.728 seconds, no skips.** The test runner isolated logs and restored existing configuration files after the run.
 
 Coverage includes:
 
 - the actual localhost wording, explanation/negation guards and late background-command handoff;
-- real build-then-Python, Python HTTP, Node, Make, Flask and Vite services, checked through independent expected-content requests;
+- real build-then-Python, Python HTTP, Node, Make, Flask and Vite services, checked through independent expected-content requests, plus startup followed by a separately requested real HTTP check;
 - Vite serving and transforming a React JSX module, not just returning its index page;
 - real syntax-error repair, slow build/readiness, port conflicts, unknown/authenticated health, owned-process cancellation and no duplicate launch;
 - productive work beyond 128 requests and 120,000 accounted tokens, successful recovery beyond prior retry thresholds, explicit caps and checkpoint resume;
@@ -67,7 +68,7 @@ Tests use fixture dependency paths for Vite 5.4.0, React/ReactDOM 18.3.1 and Fla
 
 ### Saved-conversation replay
 
-Both saved startup prefixes, including the generated worker role, new metadata and final provider payload, pass the configured 4K estimate with exact launch evidence retained. The latest replay estimated input plus schema/envelope at 2,663 tokens for `210e5bf7` and 2,546 for `5a7203d0`, before output reservation/margin.
+Both saved startup prefixes, including the generated worker role, new metadata and final provider payload, pass the configured 4K estimate with exact launch evidence retained. The latest replay estimated input plus schema/envelope at 2,657 tokens for `210e5bf7` and 2,546 for `5a7203d0`, before output reservation/margin.
 
 The saved research follow-up now retains its official result and original provenance at an estimated 2,775 input tokens. These are local estimator values, not provider tokenizer measurements. Neither history file was rewritten and the user's portfolio was neither changed nor started by the tests.
 

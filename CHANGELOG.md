@@ -7,6 +7,7 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 ### Startup routing, context recovery and uncapped continuation
 
 - Fixed startup wording such as “run my web on localhost” bypassing the Command Agent. Added read-only project metadata discovery and late handoff for authorized background commands; the model chooses the actual startup recipe.
+- Kept compound “start the app, then run checks” requests in startup routing without allowing the ready-service receipt to skip remaining work. Verified services remain visible while follow-up work runs.
 - Removed default total step/request/token/time caps and count-based repetition/protocol termination. Checkpoint cadence, explicit user spending caps, cancellation, reviews and provider/operation constraints remain. Added `/budget ... off` and migration of older generated caps/global context overrides.
 - Fixed ordinary multi-tool context overflow by coalescing generated guidance, separating generated worker instructions from user rules and fitting recoverable result previews. Exact command/path arguments remain intact. Complete prepared requests include serialization/schema overhead in their capacity check.
 - Added local, conditional conversation recall with source references, inherited subjects for follow-ups and a distinction between proposals and observed findings/commands. No extra model or embedding calls. Exact stored tool evidence no longer expires by age/count.
