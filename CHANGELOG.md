@@ -4,6 +4,14 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Same-model Command Agent
+
+- Startup requests enter a focused Command Agent using the selected endpoint/model. The parent waits; execution stays in the existing reviewed action loop. Unrelated chat turns are omitted while existing user constraints and current-task evidence remain.
+- Added a stage row below the input for reading, build/start, diagnosis, repair and verification. After readiness, the tracked service remains listed as running; unknown health is labeled unverified.
+- Preserved complete build/start chains and added bounded local build waiting without AI polling. The worker can inspect actual errors, make permitted focused repairs and run project checks. Repeated identical failures cannot renew progress.
+- Shared parent cancellation, request/token allowances, history checkpoints and the combined token footer. A ready service returns an observed receipt without another model acknowledgment. No silent worker endpoint/model fallback or global model-setting changes.
+- Corrected the settled task outcome after cancellation. Added real temporary-process tests for startup, syntax repair, build waiting and cancellation, plus routing, model pinning, history, accounting, rollback and dock-state regressions.
+
 ### Launch workflow repair
 
 - Replaced aggregate task-fact middle-truncation with complete selected launch evidence, source/cwd references and migration of older saved facts. Small recent targeted tool answers are preserved through the next decision.

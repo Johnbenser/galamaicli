@@ -586,6 +586,16 @@ from engine.task_contract import TaskContract
 
 @task_lifecycle
 def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
+    from engine.context_manager import task_request
+    from engine.command_agent import CommandAgent, should_delegate
+    bind_messages(messages, conversation_id)
+    if CONFIG.get('command_agent', True) and should_delegate(task_request(messages)):
+        with CommandAgent(messages, conversation_id, CONFIG, checkpoint) as agent:
+            return _run_agent_loop(agent.messages, conversation_id, max_steps, agent.flush)
+    return _run_agent_loop(messages, conversation_id, max_steps, checkpoint)
+
+
+def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
     bind_messages(messages, conversation_id)
     if max_steps is None:
         max_steps = int(CONFIG.get("max_iterations", 25))
@@ -654,6 +664,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
                     "name": "execute_bash", "arguments": json.dumps({"command": direct_command})}}
                 resp_raw = (SimpleNamespace(content="", reasoning="", tool_calls=[direct_call]), "direct")
             else:
+                from engine.command_agent import active_agent
+                if active_agent():
+                    active_agent().before_query()
                 resp_raw = (query_planning_graph(messages) if use_lang_workflow
                             else query_with_fallback(messages))
         except TaskBudgetExceeded as error:
@@ -902,6 +915,9 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
                     if inspected_files.get(target_path) != current_hash:
                         inspection_args = {"path": target_path, "start_line": 1, "end_line": 200}
                         inspection_result = as_result(execute_tool_call('view_file', inspection_args))
+                        from engine.command_agent import active_agent
+                        if active_agent():
+                            active_agent().observe('view_file', inspection_args, inspection_result)
                         workflow.observe('view_file', inspection_args, inspection_result, session_directory())
                         inspection, _ = inspection_result
                         if inspection.startswith("Error:"):
@@ -978,6 +994,11 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
                     pass
 
             active_model = CONFIG.get("active_model", "")
+            from engine.command_agent import active_agent
+            command_agent = active_agent()
+            if command_agent:
+                active_model = command_agent.profile['model']
+                command_agent.before_tool(tool_name, args, is_verification)
             if sensitive_command:
                 # Added only after validation and a positive review, never by the model.
                 args['_credential_access'] = True
@@ -991,6 +1012,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
                 action_result = as_result(execute_tool_call(tool_name, args, invoking_model=active_model))
                 if cache_key and action_result.success:
                     workflow.cache[cache_key] = action_result
+            if command_agent:
+                command_agent.observe(tool_name, args, action_result, is_verification)
             workflow.observe(tool_name, args, action_result, session_directory())
             action_events.append({"tool": tool_name, "args": dict(args), "result": action_result,
                                   "verification": is_verification})
@@ -1085,6 +1108,10 @@ def run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None):
                                   "content_hash": action_result.metadata.get('content_hash')}
             })
             executed_in_this_step += 1
+            if command_agent and command_agent.ready and not pending_checks:
+                finish_receipt(command_agent.receipt())
+                completed = True
+                return
 
             # Once every declared creation output is proven, ignore speculative extra proposals.
             receipt = contract.receipt(action_events, pending_checks)

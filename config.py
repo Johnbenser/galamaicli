@@ -161,6 +161,8 @@ DEFAULT_VALUES = {
     "task_token_limit": 120000,
     "task_time_limit_seconds": 1800,
     "server_startup_timeout": 30,
+    "server_build_timeout": 180,
+    "command_agent": True,
     "timeout": 60,
     "auto_execute": False
 }

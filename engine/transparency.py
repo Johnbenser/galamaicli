@@ -94,7 +94,7 @@ def task_lifecycle(function):
             state['last_task_timing']=stats
             state.setdefault('task_progress',[]).append({'completed':'Task finished','failed':'Task stopped after an error',
                 'incomplete':'Task stopped before completion','cancelled':'Task cancelled'}.get(status,'Task ended'))
-            state.update(task_active=False, is_thinking=False, is_streaming=False,
+            state.update(task_outcome=status, task_active=False, is_thinking=False, is_streaming=False,
                          active_thought_handler=None, current_thought="", escape_armed_at=None)
             if state.get('cancel_event') is cancel_event:
                 state['cancel_event'] = None

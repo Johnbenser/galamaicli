@@ -41,6 +41,7 @@ Galam is its own assistant, with its own terminal interface, settings, action wo
 | **Readable progress** | One-word activity labels and a concise status accompany a continuously animated active task. Ctrl+O opens the supplied reasoning and execution trace. |
 | **Resumable work** | A full-screen conversation picker restores saved context and the working directory when available. |
 | **Honest completion** | Each task gets measured duration, a fixed AM/PM completion time, and one combined token total, with estimates marked `~`. |
+| **Command Agent** | A focused startup worker uses your selected model, waits locally for builds/readiness, and reports below the input. Verified services remain marked running. |
 | **Local GGUF workflow** | Discover model files, save profiles, test connections, tune presets, and manage servers started by Galam. |
 
 > Model quality, speed, tool support, and usage reporting depend on the selected model and provider. Galam's workflow is designed to help smaller models stay grounded in real tool results; this repository does not claim a universal performance benchmark.
@@ -324,6 +325,10 @@ Common launch commands and explicit `execute_bash(background=true)` calls share 
 
 Processes are tracked immediately after spawn. A readiness timeout retains the live process and its private log, and retrying the same command/directory rechecks it rather than starting another copy. Startup polling is local and cancellable. `server_startup_timeout` defaults to 30 seconds (bounded at 120); an authentication response is distinguished from a successful health check. No model call is needed to poll readiness. Complete startup facts and small targeted recent answers survive compaction.
 
+Startup requests now enter a **Command Agent** using the same selected endpoint/model. The main action loop waits for this scoped worker; it does not launch competing commands. The worker keeps the current task, prior user constraints and Galam's existing review/edit rules. Its row below the input shows stages such as Reading, Building, Diagnosing, Repairing and Verifying. After a responding service is verified, that row becomes a persistent running service pill. An unknown health state displays **unverified** instead.
+
+Build/start chains run intact. Recognized build output gets a local build allowance (`server_build_timeout`, default 180 seconds, maximum 1,800), followed by the startup allowance. Repeated phase changes cannot extend the absolute deadline. On startup failure, the worker receives compact error evidence and can inspect, repair and check the implicated source. Successful readiness produces a local receipt without an extra AI acknowledgment request. Worker requests share the parent's cumulative allowances and total-token footer; local waiting uses no model requests. Set `command_agent` to `false` in settings to restore the original action loop. See [Command Agent implementation](artifacts/COMMAND_AGENT.md) for scope and verification limits.
+
 ### Security and user identity
 
 John Benser is credited as the creator. Installing Galam does **not** identify the installer as John or grant creator privileges. Each current user operates with their own terminal permissions, settings, credentials and selected conversation.
@@ -478,12 +483,13 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 325 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting, productive work beyond 25 rounds, repetition recovery, cumulative allowances and security checks. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Scripted model tests are distinct from live endpoint compatibility; the progress/security update required no paid/live API requests.
+**Latest recorded local result: 337 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting, productive work beyond 25 rounds, repetition recovery, cumulative allowances and security checks. Twelve Command Agent tests cover startup, repair, build waiting, cancellation, model pinning, history and shared accounting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Scripted model tests are distinct from live endpoint compatibility; this Command Agent update required no live API requests.
 
 | Lab notes | Scope |
 |---|---|
 | [Changelog](CHANGELOG.md) | Consolidated improvements and bug fixes |
 | [Launch repair](artifacts/LAUNCH_WORKFLOW_REPAIR.md) | Replaced failed command compaction/recovery and unified process execution |
+| [Command Agent](artifacts/COMMAND_AGENT.md) | Same-model startup delegation, below-input stages, repairs and shared accounting |
 | [Coding stress plan](artifacts/VIBE_CODING_STRESS_PLAN.md) | Realistic multi-turn scenarios, independent acceptance and bounded live pilot |
 | [Progress and security](artifacts/PROGRESS_SECURITY.md) | Renewable work, task spending, audit checks and user identity |
 | [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |

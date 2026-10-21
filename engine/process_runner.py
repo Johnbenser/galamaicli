@@ -71,6 +71,9 @@ def readiness(url):
 def launch_process(command, directory, environment, manager, readiness_url='', timeout=30):
     """Never start a second copy of this command just because readiness is pending."""
     directory = str(Path(directory).resolve())
+    from engine.command_agent import active_agent, notify
+    agent = active_agent()
+    notify('Starting')
     url = local_url(readiness_url) if readiness_url else inferred_url(command, directory, environment)
     url = local_url(url) if url else ''
     process = None
@@ -95,7 +98,14 @@ def launch_process(command, directory, environment, manager, readiness_url='', t
         entry = manager.register_task(command, process, command,
                                      str(urllib.parse.urlsplit(url).port or '') if url else '')
         entry.update(cwd=directory, log_path=str(log_path), readiness_url=url, state='starting')
-    deadline = time.monotonic() + max(1, min(int(timeout), 120))
+    if agent:
+        entry.update(agent_id=agent.id, agent_name='Command agent')
+    startup_allowance = max(1, min(int(timeout), 120))
+    deadline = time.monotonic() + startup_allowance
+    from config import CONFIG
+    build_deadline = time.monotonic() + max(1, min(int(CONFIG.get('server_build_timeout', 180)), 1800))
+    absolute_deadline = build_deadline + startup_allowance
+    phase = 'starting'
     detail = ''
     try:
         while time.monotonic() < deadline:
@@ -107,20 +117,34 @@ def launch_process(command, directory, environment, manager, readiness_url='', t
                 except ProcessLookupError:
                     pass
                 tail = log_tail(log_path, 2400)
-                return ActionResult(f'Error: Process exited with status {process.returncode}.\n{tail}',
-                                    False, process.returncode or 1, metadata={'pid': process.pid, 'log_path': str(log_path)})
+                notify('Diagnosing')
+                return ActionResult(f'Error: Process exited with status {process.returncode} during {phase}.\n{tail}',
+                                    False, process.returncode or 1, metadata={'pid': process.pid, 'log_path': str(log_path), 'phase': phase})
+            tail = log_tail(log_path)
+            # Observe actual lifecycle output; do not split or rebuild the shell command.
+            signals = list(re.finditer(r'(?im)^>[^\n]*\s(build|prebuild|postbuild|start|dev)\s*$|^(compiling|building)\b', tail))
+            if signals:
+                lifecycle_match = signals[-1]
+                observed = 'building' if (lifecycle_match[1] or lifecycle_match[2] or '').lower() in ('build','prebuild','postbuild','compiling','building') else 'starting'
+                if observed != phase:
+                    phase = observed
+                    deadline = min(absolute_deadline, build_deadline if phase == 'building' else time.monotonic() + startup_allowance)
+                    entry['state'] = phase
+                    notify('Building' if phase == 'building' else 'Starting')
             if not url:
                 # Many custom launchers announce their actual address rather than accept --port.
-                tail = log_tail(log_path)
                 found = re.search(r'(?:https?|tcp)://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\[::\]):\d+(?:/[\w./-]*)?', tail)
                 if found:
                     url = local_url(found[0])
                     entry['readiness_url'] = url
                     entry['port'] = str(urllib.parse.urlsplit(url).port)
             if url:
+                if phase != 'building':
+                    notify('Verifying')
                 state, detail = readiness(url)
                 if state in ('ready', 'auth_required'):
                     entry['state'] = state
+                    notify('Running')
                     return ActionResult(f'Background process PID {process.pid}: {detail} at {url}. '
                         f'Command: {command}\nDirectory: {directory}\nLog: {log_path}',
                         True, None, True, 'running', verified=state == 'ready',

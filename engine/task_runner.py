@@ -196,17 +196,27 @@ class TaskManager:
 
     def get_task_pill_tokens(self) -> list:
         tasks = self.get_active_tasks()
+        active_ids = {row['id'] for row in AGENT_STATE.get('active_subagents', []) if row.get('task') == 'command'}
+        tasks = [task for task in tasks if task.get('agent_id') not in active_ids]
         if not tasks:
             return []
         latest = tasks[-1]
         time_str = latest.get("start_time", "background")
-        cmd_str = latest.get("cmd", "server")
+        from engine.transparency import safe_display
+        import shutil
+        cols = shutil.get_terminal_size((44,24)).columns
+        prefix = (latest.get('agent_name', '') + ' · ') if latest.get('agent_name') else ''
+        cmd_str = prefix + re.sub(r'\s+', ' ', safe_display(latest.get("cmd", "server")))
+        cmd_str = cmd_str[:max(8, cols-26)]
+        state = latest.get('state', 'ready')
+        label = 'running' if state in ('ready', 'auth_required') else 'unverified' if state == 'running_unverified' else state
+        color = 'fg:#4ade80' if label == 'running' else 'fg:#facc15'
 
         return [
             ("fg:#facc15 bold", "• "),
             ("fg:#94a3b8", f"[{time_str}] "),
             ("fg:#818cf8 bold", f"{cmd_str} "),
-            ("fg:#4ade80", "running\n")
+            (color, label+"\n")
         ]
 
 GLOBAL_TASK_MANAGER = TaskManager()

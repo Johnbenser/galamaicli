@@ -439,6 +439,8 @@ def get_bottom_toolbar_tokens():
     tokens.append((f"fg:{THEME['border']}", f"{divider}\n"))
 
     # 3. Active Background Server Pill
+    from engine.command_agent import dock_tokens
+    tokens.extend(dock_tokens(cols))
     pill_tokens = GLOBAL_TASK_MANAGER.get_task_pill_tokens()
     if pill_tokens:
         tokens.extend(pill_tokens)

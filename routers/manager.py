@@ -90,10 +90,12 @@ def urllib_stream_request(url: str, headers: dict, payload: dict, timeout: int =
 
 
 def _recorded_post(url, headers, payload, stream_enabled, timeout):
+    from engine.command_agent import request_profile
+    profile = request_profile()
     from engine.api_protocols import prepare_payload
     payload=prepare_payload(url,payload)
     model = payload.get('model') or (url.split('/models/',1)[1].split(':',1)[0] if '/models/' in url else CONFIG.get('active_model',''))
-    row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),model,payload,delta='/ai/run/' in url)
+    row = usage_meter.begin_request(profile.get('endpoint') or CONFIG.get('active_endpoint',''),model,payload,delta='/ai/run/' in url)
     try:
         response = cancellation.call(lambda: SESSION.post(url,headers=headers,json=payload,
             stream=stream_enabled,timeout=timeout), dispose=lambda response: response.close())
@@ -104,9 +106,11 @@ def _recorded_post(url, headers, payload, stream_enabled, timeout):
 
 
 def _recorded_urllib(url,headers,payload,timeout):
+    from engine.command_agent import request_profile
+    profile = request_profile()
     from engine.api_protocols import prepare_payload
     payload=prepare_payload(url,payload)
-    row = usage_meter.begin_request(CONFIG.get('active_endpoint',''),payload.get('model',CONFIG.get('active_model','')),payload,delta='/ai/run/' in url)
+    row = usage_meter.begin_request(profile.get('endpoint') or CONFIG.get('active_endpoint',''),payload.get('model',profile.get('model') or CONFIG.get('active_model','')),payload,delta='/ai/run/' in url)
     try:
         response = cancellation.call(lambda: urllib_stream_request(url,headers,payload,timeout=timeout),
             dispose=lambda response: response.close())
@@ -764,6 +768,8 @@ def query_subagent(messages: list) -> str:
 
 
 def query_with_fallback(*args, **kwargs):
+    from engine.command_agent import request_profile
+    profile = request_profile()
     visited = set(kwargs.pop('_visited_endpoints', ()))
     raw_messages = kwargs.get("messages")
     if raw_messages is None and len(args) > 0:
@@ -775,13 +781,13 @@ def query_with_fallback(*args, **kwargs):
     usage_start = len(usage_meter.ledger()['requests'])
 
     stream_enabled = CONFIG.get("stream", True)
-    active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", "Direct")
-    active_m = CONFIG.get("active_model") or CONFIG.get("model", "gemini-3.5-flash")
+    active_ep = profile.get('endpoint') or CONFIG.get("active_endpoint") or CONFIG.get("endpoint", "Direct")
+    active_m = profile.get('model') or CONFIG.get("active_model") or CONFIG.get("model", "gemini-3.5-flash")
     if active_ep in visited:
         return 'EXHAUSTED', active_m
     visited.add(active_ep)
 
-    if active_ep == "Local Endpoint" and not ENDPOINT_REGISTRY[active_ep]["models"].get(active_m,{}).get("custom_connection"):
+    if not profile and active_ep == "Local Endpoint" and not ENDPOINT_REGISTRY[active_ep]["models"].get(active_m,{}).get("custom_connection"):
         from engine.local_models import refresh_local_models
         advertised = refresh_local_models(CONFIG)
         if advertised and active_m not in advertised:
@@ -796,6 +802,8 @@ def query_with_fallback(*args, **kwargs):
     ordered_models += [m for m in models_in_ep if m not in ordered_models]
     if not ordered_models and models_in_ep:
         ordered_models = list(models_in_ep)
+    if profile:
+        ordered_models = [active_m] if active_m in models_in_ep else []
     clean_model_tag = active_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
 
     for model_name in ordered_models:
@@ -1357,7 +1365,8 @@ def query_with_fallback(*args, **kwargs):
                               full_content+full_reasoning+json.dumps(tool_calls))}
             )
 
-            save_settings(active_model=model_name, model=model_name)
+            if not profile:
+                save_settings(active_model=model_name, model=model_name)
             response_obj = AgentResponse(
                 content=full_content,
                 role="assistant",
@@ -1413,6 +1422,9 @@ def query_with_fallback(*args, **kwargs):
 
     if AGENT_STATE.get("abort", False):
         return "CANCELLED", active_m
+
+    if profile:
+        return 'FAILED', active_m
 
     if active_ep == "Local Endpoint":
         sys.stdout.write(f"\n\033[1;31m[!] Local Endpoint encountered an error or is unreachable.\033[0m\n")
