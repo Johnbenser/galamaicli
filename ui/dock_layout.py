@@ -318,7 +318,7 @@ def shortcut_hint_visible(now=None):
 def _refresh_thinking_animation():
     """The animation clock is independent of network responses and token arrivals."""
     app = AGENT_STATE.get('app_ref')
-    if (_thinking_active() or _btw_active()) and app:
+    if (_thinking_active() or _btw_active()) and app and not AGENT_STATE.get('review_pending'):
         try:
             app.invalidate()
         except Exception:
@@ -333,7 +333,7 @@ def get_prompt_text():
     live = not prompt_session.app.is_done
 
     # 1. Live Thinking Header (animated loading spinner with dynamic dots)
-    if (_thinking_active() or _btw_active()) and live:
+    if (_thinking_active() or _btw_active()) and live and not AGENT_STATE.get('review_pending'):
         SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         DOT_FRAMES = [".  ", ".. ", "...", " ..", "  .", "   "]
         t = time.time()
@@ -561,7 +561,7 @@ def request_user_confirmation(prompt_text: str = "", default: str = "y", prompt_
     Guarantees zero stdin deadlocks between worker threads and PromptSession.
     """
     if prompt_text:
-        sys.stdout.write(prompt_text)
+        sys.stdout.write(prompt_text.rstrip()+'\n')
         sys.stdout.flush()
 
     if AGENT_STATE.get("app_ref") or threading.current_thread() != threading.main_thread():

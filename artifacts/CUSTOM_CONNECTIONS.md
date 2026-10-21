@@ -4,7 +4,7 @@ Updated 21 October 2026.
 
 ## Terminal workflow
 
-Settings uses a full-screen colored workspace with an active-engine panel, framed menu, status and keyboard hints. Execution mode, fallback, streaming, provider/model selection and the local GGUF manager retain their existing actions. Browsing another endpoint does not activate it until a model is selected; activation saves the endpoint/model aliases together.
+Settings uses the original compact ten-line inline menu and original color accents. The connection wizard also stays inline, with no alternate-screen switch or global background color. Prompt Toolkit clears only the settings render region when it closes; there is no fixed cursor-up screen cleanup. Execution mode, fallback, streaming, provider/model selection and the local GGUF manager retain their existing actions. Browsing another endpoint does not activate it until a model is selected; activation saves the endpoint/model aliases together.
 
 Model Connections opens inside the same Application, with its own key bindings, then returns to settings. The wizard has four steps:
 
@@ -53,6 +53,8 @@ Adapters translate only at the transport boundary, after Galam adds its common m
 
 Responses uses input items, flat functions, original call IDs, function outputs, max-output tokens and stateless reasoning continuity. JSON/SSE parsing avoids duplicated final snapshots. Reasoning continuity is scoped to the originating endpoint/model/URL.
 
+Response framing handles SSE, NDJSON and pretty JSON. Native JSON streams are recognized even with `application/json` headers. If a service streams despite `stream=False`, its records are combined without losing content, tool arguments or final usage. Invalid/truncated JSON fails explicitly. Fallback approval hides the thinking spinner and prints complete question lines.
+
 Native Ollama uses `/api/chat` messages, options such as `num_predict`, object-valued function arguments and named tool results. JSON and NDJSON streams return content, provider-supplied thinking text, structured actions and prompt/evaluation token counts. Separate streamed calls receive distinct action indexes. Its reported input/output usage is counted once per request.
 
 Custom models survive local discovery refresh; per-model URLs bypass built-in hardcoded routes. Context limits remain capped by the custom model's declared limit.
@@ -65,4 +67,9 @@ The full regression suite covers existing workflows as well as private credentia
 
 Keyboard tests exercise 44- and 28-column terminals, embedded settings navigation, arrows → Tab → confirm endpoint selection, review-before-save, masked secrets and cancellation. These fixtures validate client behavior; they do not establish live compatibility or model availability for every provider.
 
-Final regression result: **265 tests passed**, including the new settings/native-Ollama coverage. Changed modules compiled successfully.
+Final regression result: **271 tests passed**, including the new settings/native-Ollama coverage. Changed modules compiled successfully.
+
+
+## Resumed inline transcript
+
+Saved messages now use the same assistant renderer as live replies, alongside wrapped user prompt arrows and dividers. History replay keeps stored timing/token footers, filters internal tool observations, preserves all conversation context, and performs no model or action calls. The full-screen conversation picker remains unchanged; replay returns to normal inline chat.

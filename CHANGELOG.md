@@ -6,7 +6,7 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ### Added
 
-- Colored full-screen settings panels and an embedded four-step model connection wizard with review before save.
+- Embedded four-step model connection wizard with review before save, presented in the original compact inline settings style.
 - Native Ollama `/api/chat` requests, NDJSON/JSON replies, structured action round trips and provider token accounting.
 
 - Settings → Model Connections: add/edit a model, assign an endpoint group, choose Chat Completions or Responses, enter a masked API key and optionally activate immediately.
@@ -28,6 +28,11 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 - `/changelog` renders the repository's update record locally without a model request.
 
 ### Improved
+
+- Restored the original inline settings menu and terminal background while retaining the new setup flow, URL preservation and selection fixes. Settings closes by clearing its own render region.
+- Resumed conversation replay uses live chat formatting, user dividers/arrows and saved duration/token footers instead of plain role labels; context and actions remain untouched.
+- JSON framing handles mislabeled native streams, unexpected non-streaming NDJSON and pretty JSON without the `Extra data` parsing failure. Function fragments and reported usage are retained.
+- Fallback confirmation hides the thinking spinner and ends printed question lines before showing the input prompt.
 
 - Endpoint assignment follows the highlighted row, fixing stale checked values that could save Direct selections under Groq. Numbers remain available, including multi-digit choices.
 - Default preserves the exact entered request URL. Payload inference is local; explicit format choices also leave the destination unchanged. Typed URLs survive endpoint-group changes.

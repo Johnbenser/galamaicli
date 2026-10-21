@@ -200,8 +200,10 @@ def ollama_chunk(data,response=None):
     return message.get('content') or '',message.get('thinking') or '',tools,finish
 
 
-def streaming_response(content_type):
-    return any(kind in content_type.lower() for kind in ('text/event-stream','application/x-ndjson','application/ndjson'))
+def streaming_response(content_type,url='',model=''):
+    # Some native services/proxies label streamed JSON as application/json.
+    return (any(kind in content_type.lower() for kind in ('text/event-stream','application/x-ndjson','application/ndjson'))
+            or bool(url and wire_format(url,model)=='ollama'))
 
 
 def stream_data(line):
@@ -211,3 +213,29 @@ def stream_data(line):
     if line.startswith('data:'):return line[5:].strip()
     if line.startswith('{'):return line
     return None
+
+
+def json_records(lines):
+    """Frame SSE, NDJSON and pretty JSON independently of misleading MIME labels.
+
+    Incomplete JSON is buffered across lines. Complete objects are emitted once;
+    the existing router owns usage, cancellation and tool handling.
+    """
+    decoder=json.JSONDecoder();pending=''
+    for line in lines:
+        if isinstance(line,bytes):line=line.decode('utf-8-sig')
+        line=line.strip()
+        if not line or line.startswith((':','event:','id:','retry:')):continue
+        if line.startswith('data:'):line=line[5:].strip()
+        if line=='[DONE]':
+            if pending.strip():raise ValueError('Provider ended with incomplete JSON.')
+            yield b'data: [DONE]'
+            return
+        pending+=line+'\n'
+        while pending.strip():
+            pending=pending.lstrip()
+            try:_,end=decoder.raw_decode(pending)
+            except json.JSONDecodeError:break
+            yield ('data: '+pending[:end]).encode('utf-8')
+            pending=pending[end:]
+    if pending.strip():raise ValueError('Provider returned incomplete or invalid JSON.')

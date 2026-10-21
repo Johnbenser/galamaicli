@@ -42,18 +42,26 @@ class NativeOllamaTests(Workspace):
                     'tool_calls':[{'function':{'name':'execute_bash','arguments':{'command':"printf OLLAMA_ACTION_OK"}}}]}
                 result={'model':body['model'],'message':message,'done':True,'done_reason':'stop',
                         'prompt_eval_count':71,'eval_count':19}
-                data=json.dumps(result).encode()+b'\n'
+                mode=self.server.fixture_mode
+                if mode in ('mislabeled','ignores_stream'):
+                    prefix={'model':body['model'],'message':{'content':'Terminal returned ' if second else '',
+                            'thinking':'' if second else 'Checking terminal output.'},'done':False}
+                    if second:result['message']['content']='OLLAMA_ACTION_OK.'
+                    else:result['message'].pop('thinking',None)
+                    data=('\n'.join(json.dumps(row) for row in (prefix,result))+'\n').encode()
+                else:data=(json.dumps(result,indent=2 if mode=='pretty' else None)+'\n').encode()
                 self.send_response(200)
-                self.send_header('Content-Type','application/x-ndjson' if body.get('stream') else 'application/json')
+                self.send_header('Content-Type','application/x-ndjson' if mode=='normal' and body.get('stream') else 'application/json')
                 self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
         server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
-            for streaming in (False,True):
-                with self.subTest(streaming=streaming):
+            for mode,streaming in (('normal',False),('normal',True),('mislabeled',True),('ignores_stream',False),('pretty',True)):
+                server.fixture_mode=mode
+                with self.subTest(streaming=streaming,mode=mode):
                     usage.start_task('native')
                     url=f'http://127.0.0.1:{server.server_port}/api/chat'
-                    profile=store.save_profile({**self.profile,'model':'native-'+str(streaming),'url':url,'api_format':'default'})
+                    profile=store.save_profile({**self.profile,'model':'native-'+mode+'-'+str(streaming),'url':url,'api_format':'default'})
                     self.assertEqual(profile['api_format'],'ollama');self.assertEqual(profile['url'],url)
                     messages=[{'role':'user','content':'Execute a bash command in the terminal then report its output.'}]
                     with patch.dict(CONFIG,{'active_endpoint':profile['endpoint'],'active_model':profile['model'],'stream':streaming}), \

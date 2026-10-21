@@ -1,15 +1,12 @@
-"""Shared terminal palette for settings and connection setup."""
+"""Original inline settings colors; the terminal background belongs to the user."""
 from prompt_toolkit.styles import Style
 
 SETTINGS_STYLE=Style.from_dict({
-    '':'bg:#0b1120 fg:#cbd5e1',
-    'frame.border':'fg:#475569', 'frame.label':'fg:#a78bfa bold',
-    'title':'fg:#38bdf8 bold','input':'bg:#1e293b fg:#f8fafc',
-    'status':'fg:#fbbf24','hint':'fg:#94a3b8','help':'fg:#94a3b8',
-    'cursor':'fg:#34d399 bold','selected':'bg:#1e293b fg:#f8fafc bold',
-    'selected_hint':'bg:#1e293b fg:#38bdf8','unselected':'fg:#cbd5e1',
-    'button':'bg:#1e293b fg:#cbd5e1',
-    'button.focused':'bg:#38bdf8 fg:#0b1120 bold',
+    'title':'fg:#38bdf8 bold','border':'fg:#3f3f46',
+    'cursor':'fg:#38bdf8 bold','selected':'fg:#ffffff bg:#1e293b bold',
+    'selected_hint':'fg:#38bdf8 bg:#1e293b bold','unselected':'fg:#94a3b8',
+    'hint':'fg:#64748b','help':'fg:#52525b','status':'fg:#fbbf24',
+    'input':'fg:#f8fafc','button.focused':'fg:#38bdf8 bold',
     'radio-selected':'fg:#38bdf8 bold','radio-checked':'fg:#34d399',
     'checkbox-checked':'fg:#34d399',
 })

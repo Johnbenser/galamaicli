@@ -1,8 +1,6 @@
 from prompt_toolkit.application import Application
 from prompt_toolkit.key_binding import KeyBindings,ConditionalKeyBindings,DynamicKeyBindings,merge_key_bindings
 from prompt_toolkit.layout.containers import Window, HSplit,DynamicContainer
-from prompt_toolkit.widgets import Frame,Box
-from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.layout.controls import FormattedTextControl
@@ -190,33 +188,41 @@ class InlineSettingsApp:
                 'local':'Local models','local_add':'Select GGUF','local_result':'Local model status'}.get(self.screen,'Settings')
 
     def get_formatted_text(self):
+        """Original compact ten-line menu, with cell-safe rows on narrow terminals."""
         items=self._get_items()
-        size=get_app().output.get_size()
-        width=max(12,size.columns-6)
-        visible=max(3,size.rows-12)
-        start=max(0,min(self.cursor_idx-visible//2,len(items)-visible))
+        width=max(12,get_app().output.get_size().columns-1)
         def crop(text,limit):
             result=''
             for char in text:
                 if get_cwidth(result+char)>limit-1:return result+'…'
                 result+=char
             return result
-        lines=[]
-        for index,item in enumerate(items[start:start+visible],start):
+        title={'main':'Galam.AI Settings','endpoints':'Select Endpoint','models':'Select Model ['+self.selected_ep+']',
+               'local':'Local Models','local_add':'Select GGUF','local_result':'Local Model Status'}.get(self.screen,'Settings')
+        lines=[('class:title',crop('╭── '+title,width)+'\n')]
+        start=max(0,min(self.cursor_idx-3,len(items)-7))
+        for index,item in enumerate(items[start:start+7],start):
             selected=index==self.cursor_idx
-            style='class:selected' if selected else 'class:unselected'
-            lines.append(('class:cursor' if selected else 'class:hint',' › ' if selected else '   '))
             label=item.get('label','');hint=item.get('hint','')
-            text=label+'  '+hint
-            if get_cwidth(text)>width-3:text=label
-            lines.append((style,crop(text,width-3)))
+            available=width-4
+            # Keep the old aligned label/value layout when it fits.
+            label_width=min(24,max(len(label),available-len(hint)-1))
+            text=label.ljust(label_width)+((' '+hint) if hint else '')
+            lines.append(('class:cursor' if selected else 'class:border','│ ▶ ' if selected else '│   '))
+            shown=crop(text,available)
+            split=min(len(shown),len(label.ljust(label_width)))
+            lines.append(('class:selected' if selected else 'class:unselected',shown[:split]))
+            if shown[split:]:lines.append(('class:selected_hint' if selected else 'class:hint',shown[split:]))
             lines.append(('', '\n'))
-        if not items:lines.append(('class:hint','No models here. Add one in Model Connections.'))
+        for _ in range(max(0,7-len(items[start:start+7]))):lines.append(('class:border','│\n'))
+        lines.append(('class:border','╰'+'─'*min(42,width-1)+'\n'))
+        lines.append(('class:help',crop('  ↑/↓ Navigate · Enter Select · Esc Back',width)))
         return lines
 
     def close_connections(self):
         self.selected_ep=CONFIG.get('active_endpoint',self.selected_ep)
-        self.screen='main';self.cursor_idx=6
+        self.screen='main'
+        self.cursor_idx=next((index for index,item in enumerate(self._get_items()) if item.get('action')=='to_connections'),0)
         self.status='Connection editor closed. Saved changes are applied.'
         self.app.layout.focus(self.menu_window);self.app.invalidate()
 
@@ -230,20 +236,14 @@ class InlineSettingsApp:
 
     def build_application(self):
         from ui.settings_theme import SETTINGS_STYLE
-        self.menu_window=Window(FormattedTextControl(self.get_formatted_text),wrap_lines=False)
-        root=HSplit([
-            Window(FormattedTextControl('  GALAM / SETTINGS'),height=1,style='class:title'),
-            Frame(Box(Window(FormattedTextControl(lambda:'Engine  '+str(CONFIG.get('active_endpoint',''))+
-                     '\n'+str(CONFIG.get('active_model',''))),height=2,wrap_lines=False),padding=0),title='Active connection'),
-            Frame(Box(self.menu_window,padding=1),title=self.page_title),
-            Window(FormattedTextControl(lambda:self.status),height=Dimension(min=1,max=2),wrap_lines=True,style='class:status'),
-            Window(FormattedTextControl('↑/↓ move · Enter select · Esc back'),height=2,wrap_lines=True,style='class:hint')])
+        self.menu_window=Window(FormattedTextControl(self.get_formatted_text),height=10,wrap_lines=False)
+        root=HSplit([self.menu_window])
         keys=merge_key_bindings([
             ConditionalKeyBindings(self.kb,Condition(lambda:self.screen!='connections')),
             ConditionalKeyBindings(DynamicKeyBindings(lambda:self.editor.key_bindings if hasattr(self,'editor') else None),
                                    Condition(lambda:self.screen=='connections'))])
         app=Application(layout=Layout(DynamicContainer(lambda:self.editor.root if self.screen=='connections' else root)),
-                        key_bindings=keys,style=SETTINGS_STYLE,full_screen=True,mouse_support=False)
+                        key_bindings=keys,style=SETTINGS_STYLE,full_screen=False,erase_when_done=True,mouse_support=False)
         app.ttimeoutlen=.1
         self.app=app
         return app

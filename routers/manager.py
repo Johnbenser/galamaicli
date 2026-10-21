@@ -1,4 +1,4 @@
-from engine.api_protocols import streaming_response, stream_data
+from engine.api_protocols import streaming_response, stream_data, json_records
 import sys
 import os
 import re
@@ -121,7 +121,37 @@ def _recorded_urllib(url,headers,payload,timeout):
 
 
 def _response_json(response,is_urllib=False):
-    data = cancellation.call(lambda: json.loads(response.read().decode('utf-8',errors='replace')) if is_urllib else response.json())
+    try:
+        if is_urllib:
+            raw=cancellation.call(lambda:response.read().decode('utf-8',errors='replace'))
+            response._galam_raw_body=raw
+            data=json.loads(raw)
+        else:data=cancellation.call(response.json)
+    except json.JSONDecodeError:
+        # A service may stream despite stream=False. Decode the observed framing,
+        # preserving every delta rather than dropping all but the last object.
+        raw=getattr(response,'_galam_raw_body',None) if is_urllib else response.text
+        if raw is None:raise ProviderStreamError('Provider returned invalid JSON.') from None
+        content=[];reasoning=[];tools={};finish=''
+        try:
+            for line in json_records(str(raw).splitlines()):
+                value=stream_data(line)
+                if value=='[DONE]':break
+                event=json.loads(value)
+                usage_meter.capture(response,event)
+                c,r,t,f=_extract_stream_chunk(event,response)
+                content.append(c);reasoning.append(r)
+                for call in t:
+                    index=call.get('index',len(tools))
+                    previous=tools.setdefault(index,{'id':call.get('id') or 'call_'+uuid.uuid4().hex,'type':'function','function':{'name':'','arguments':''}})
+                    if call.get('id'):previous['id']=call['id']
+                    for key in ('name','arguments'):previous['function'][key]+=call.get('function',{}).get(key) or ''
+                finish=f or finish
+        except (ValueError,TypeError) as error:raise ProviderStreamError('Invalid response framing: '+str(error)) from None
+        if not content and not reasoning and not tools:raise ProviderStreamError('Provider returned an empty JSON stream.')
+        data={'choices':[{'message':{'content':''.join(content),'reasoning_content':''.join(reasoning),'tool_calls':list(tools.values())},
+                          'finish_reason':finish}]}
+        response._galam_finish_reason=finish
     usage_meter.capture(response,data)
     if isinstance(data,dict):
         from engine.api_protocols import remember_reasoning,response_chunk
@@ -671,8 +701,8 @@ def query_subagent(messages: list) -> str:
             from engine.transparency import begin_generation, append_reasoning
             reasoning_row = begin_generation(model_name + " (side request)")
             splitter = ReasoningStream()
-            if stream_enabled and streaming_response(resp.headers.get("Content-Type", "")):
-                for line in cancellation.lines(resp.iter_lines(), close=getattr(resp, "close", None)):
+            if stream_enabled and streaming_response(resp.headers.get("Content-Type", ""),url,model_name):
+                for line in json_records(cancellation.lines(resp.iter_lines(), close=getattr(resp, "close", None))):
                     if not line:
                         continue
                     decoded = line.decode("utf-8").strip()
@@ -954,10 +984,10 @@ def query_with_fallback(*args, **kwargs):
             AGENT_STATE["is_streaming"] = True
 
             c_type = resp.headers.get("Content-Type", "") if hasattr(resp, "headers") else (resp.info().get("Content-Type", "") if hasattr(resp, "info") else "")
-            if stream_enabled and streaming_response(c_type):
+            if stream_enabled and streaming_response(c_type,url,model_name):
                 try:
                     line_iter = cancellation.lines(resp if is_urllib else resp.iter_lines(), close=getattr(resp, "close", None))
-                    for line in line_iter:
+                    for line in json_records(line_iter):
                         if AGENT_STATE.get("abort", False):
                             thought_ui.clear()
                             sys.stdout.write("\n\033[1;33m[!] Generation cancelled by user.\033[0m\n")
@@ -1122,9 +1152,9 @@ def query_with_fallback(*args, **kwargs):
 
                     c_type_cont = c_resp.headers.get("Content-Type", "") if hasattr(c_resp, "headers") else (c_resp.info().get("Content-Type", "") if hasattr(c_resp, "info") else "")
                     last_finish_reason = "stop"
-                    if stream_enabled and streaming_response(c_type_cont):
+                    if stream_enabled and streaming_response(c_type_cont,c_url,model_name):
                         c_line_iter = cancellation.lines(c_resp if c_is_urllib else c_resp.iter_lines(), close=getattr(c_resp, "close", None))
-                        for c_line in c_line_iter:
+                        for c_line in json_records(c_line_iter):
                             if AGENT_STATE.get("abort", False):
                                 break
                             if not c_line:

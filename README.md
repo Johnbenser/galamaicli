@@ -113,7 +113,7 @@ Restart Galam after updating. Commit or set aside your own source changes before
 
 ### Add a model or custom endpoint in settings
 
-Settings now opens a full-screen workspace with colored panels for the active connection, menu, status and navigation. All existing execution, fallback, streaming and local-model controls remain available.
+Settings keeps the original compact inline menu and terminal colors. The four-step connection flow opens in the same inline application, with no alternate-screen switch. Execution, fallback, streaming and local-model controls remain available.
 
 Open **`/settings` → Model Connections**. A four-step wizard opens inside the same settings application:
 
@@ -126,7 +126,7 @@ A provider choice offers a full request URL only when the URL field is empty or 
 
 **Tab / Shift+Tab** moves between controls; **Ctrl+S** advances to the next step and saves only from Review. **Esc** goes back a step; at the first step it returns to settings. **Cancel** discards the form. Save feedback stays inside the editor. Connection changes are blocked during active main/side tasks.
 
-Native Ollama chat supports JSON and NDJSON streaming, structured Bash/file actions, native tool results, thinking text supplied by the provider, and its reported prompt/evaluation token counts. Existing Chat Completions and Responses connections retain Galam's common action pipeline.
+Native Ollama chat supports JSON and NDJSON streaming, including JSON streams mislabeled by a server or proxy, structured Bash/file actions, native tool results, thinking text supplied by the provider, and its reported prompt/evaluation token counts. Existing Chat Completions and Responses connections retain Galam's common action pipeline.
 
 Custom definitions live in **`~/.galam/endpoints.json`** and contain only routing metadata and credential variable names. Keys entered here go only into **`~/.secrets`**, written privately with mode `600`. Existing exports and comments are preserved; updating a variable avoids duplicate assignments. The selected home follows an existing Termux `~/.secrets` when Galam runs through an alternate home, and `GALAM_HOME` can explicitly select a home directory.
 
@@ -392,7 +392,9 @@ python galam.py resume
 python galam.py resume SESSION_ID
 ```
 
-The picker uses a clean full-screen view with centered conversations and a preview:
+The picker uses a clean full-screen view with centered conversations and a preview. After selection, the restored conversation uses the normal inline chat dividers, prompt arrows and assistant formatting; saved timing/token footers remain unchanged. Replaying history sends no model requests and runs no actions.
+
+Picker controls:
 
 | Key | Action |
 |---|---|
@@ -450,7 +452,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 265 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 271 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|

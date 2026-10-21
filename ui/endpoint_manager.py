@@ -1,4 +1,4 @@
-"""Separate full-screen connection editor; no stdout inside the settings renderer."""
+"""Inline connection wizard; feedback stays inside its own render region."""
 import copy
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
@@ -8,7 +8,7 @@ from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit,VSplit,DynamicContainer,Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.scrollable_pane import ScrollablePane
-from prompt_toolkit.widgets import TextArea,Label,Button,RadioList,Checkbox,Frame,Box
+from prompt_toolkit.widgets import TextArea,Label,Button,RadioList,Checkbox
 from prompt_toolkit.history import DummyHistory
 from prompt_toolkit.layout.dimension import Dimension
 
@@ -48,14 +48,17 @@ class EndpointManager:
         self.key_bindings.add('c-s')(lambda event:self.advance())
         self.key_bindings.add('escape',eager=True)(self.escape)
         self.key_bindings.add('c-c')(self.escape)
+        self.blocked=HSplit([Label('Connection editor unavailable during active work.'),Button('Back',handler=self.finish)])
         self.body=DynamicContainer(self.container)
         from ui.settings_theme import SETTINGS_STYLE
         self.app=Application(layout=Layout(HSplit([
-            Window(FormattedTextControl('  GALAM / SETTINGS / CONNECTIONS'),height=1,style='class:title'),
-            Frame(Box(self.body,padding=1),title='Model connection'),
+            Window(FormattedTextControl('╭── Model Connections'),height=1,style='class:title'),
+            self.body,
+            Window(FormattedTextControl('╰──────────────────────────'),height=1,style='class:border'),
             Window(FormattedTextControl(lambda:self.status),height=Dimension(min=1,max=3),wrap_lines=True,style='class:status'),
             Window(FormattedTextControl('Tab: move · Ctrl+S: next/save · Esc: back'),height=2,wrap_lines=True,style='class:hint')
-        ])),key_bindings=self.key_bindings,full_screen=True,mouse_support=True,style=SETTINGS_STYLE)
+        ],height=lambda:min(18,max(10,get_app().output.get_size().rows-4)))),key_bindings=self.key_bindings,
+            full_screen=False,erase_when_done=True,mouse_support=False,style=SETTINGS_STYLE)
         self.root=self.app.layout.container
         self.app.ttimeoutlen=.1
         self.form=self.make_form()
@@ -64,6 +67,7 @@ class EndpointManager:
         if busy():
             self.status='Finish or cancel the current task before changing model connections.'
             self.page='blocked'
+            self.app.layout.focus(self.blocked)
         else:self.app.layout.focus(self.endpoint_button)
 
     def protocol_values(self):
@@ -137,7 +141,7 @@ class EndpointManager:
         if hasattr(self,'app'):self.app.invalidate()
 
     def container(self):
-        if self.page=='blocked':return HSplit([Label('Connection editor unavailable during active work.'),Button('Back',handler=self.finish)])
+        if self.page=='blocked':return self.blocked
         if self.page=='result':return self.result
         if self.page=='picker':return self.picker_view
         # DynamicContainer is evaluated during Application initialization.

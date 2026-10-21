@@ -89,19 +89,14 @@ def save_history():
 
 def display_resumed_history(messages):
     from engine.context_manager import is_user_request
-    from engine.transparency import safe_display
     from engine.response_stats import KEY,footer
     turns = [m for m in messages if is_user_request(m) or
              (m.get('role') == 'assistant' and m.get('content') and not m.get('_galam_tool_calls'))]
     print(f'\nResumed conversation: {len(turns)} messages. Showing the latest {min(20,len(turns))}; full context retained.\n')
     for message in turns[-20:]:
-        label = 'You' if message['role'] == 'user' else 'Galam'
-        body = str(message.get('content',''))
-        if label == 'Galam':
-            body = render_markdown_response(clean_response_text(body))
-        else:
-            body = safe_display(body)
-        print(f'{label}:\n{body}\n')
+        from ui.chat_transcript import assistant_text,user_text
+        body=assistant_text(message.get('content','')) if message['role']=='assistant' else user_text(message.get('content',''))
+        sys.stdout.write(body)
         if message.get(KEY):
             print(footer(message[KEY])+'\n')
 
@@ -602,8 +597,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
 
     def finish_receipt(receipt):
         messages.append({"role": "assistant", "content": receipt})
-        sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-        sys.stdout.write(render_markdown_response(receipt, indent="  ") + "\n\n")
+        from ui.chat_transcript import assistant_text
+        sys.stdout.write("\r\033[2K"+assistant_text(receipt))
         sys.stdout.flush()
 
     while step < max_steps:
@@ -739,10 +734,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 if messages and messages[-1].get("role") == "assistant":
                     messages[-1]["content"] = clean_text
             if clean_text:
-                sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-                if is_post_tool_turn and last_tool_result and last_tool_result[2]:
-                    sys.stdout.write("  \033[1;32mSuccess.\033[0m\n\n")
-                sys.stdout.write(render_markdown_response(clean_text, indent="  ") + "\n\n")
+                from ui.chat_transcript import assistant_text
+                sys.stdout.write("\r\033[2K"+assistant_text(clean_text,success=bool(is_post_tool_turn and last_tool_result and last_tool_result[2])))
                 sys.stdout.flush()
             completed = not (last_tool_result and not last_tool_result[2]) and (not action_requested or bool(executed_commands))
             break
@@ -1110,9 +1103,8 @@ def run_agent_loop(messages, conversation_id, max_steps=None):
                 sys.stdout.flush()
                 break
             if clean_text:
-                sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai\033[0m\n\n")
-                rendered = render_markdown_response(clean_text, indent="  ")
-                sys.stdout.write(rendered + "\n\n")
+                from ui.chat_transcript import assistant_text
+                sys.stdout.write("\r\033[2K"+assistant_text(clean_text))
                 sys.stdout.flush()
             break
 
