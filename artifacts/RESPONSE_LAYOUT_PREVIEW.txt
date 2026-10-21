@@ -26,6 +26,4 @@
   Note: Counts come from the supplied
   response; formatting runs locally.
 
-  Worked for 0m 27s • 03:02:40
-  Tokens: 1,200 input + 340 output = 1,540
-  total (provider reported)
+  Worked for 0m 27s • 03:02:40 PM • Total Token 1,540

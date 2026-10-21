@@ -76,11 +76,11 @@ class PendingDisplayTests(unittest.TestCase):
 
     def test_completed_task_duration_and_current_clock(self):
         with patch.dict(AGENT_STATE,{'last_task_timing':{'elapsed':125.9,'cancelled':False}}), \
-             patch.object(dock.time,'strftime',return_value='14:22:08'):
-            self.assertEqual(dock.completed_task_text(),'Worked for 2m 05s • 14:22:08')
+             patch.object(dock.time,'strftime',return_value='02:22:08 PM'):
+            self.assertEqual(dock.completed_task_text(),'Worked for 2m 05s • 02:22:08 PM • Total Token unavailable')
         with patch.dict(AGENT_STATE,{'last_task_timing':{'elapsed':3,'cancelled':True}}), \
-             patch.object(dock.time,'strftime',return_value='14:22:09'):
-            self.assertEqual(dock.completed_task_text(),'Cancelled after 0m 03s • 14:22:09')
+             patch.object(dock.time,'strftime',return_value='02:22:09 PM'):
+            self.assertEqual(dock.completed_task_text(),'Cancelled after 0m 03s • 02:22:09 PM • Total Token unavailable')
 
     def test_task_timing_measures_execution_once_instead_of_queue_wait(self):
         @task_lifecycle

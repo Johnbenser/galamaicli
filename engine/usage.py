@@ -1,22 +1,26 @@
 """Per-request counters with provider usage kept separate from estimates."""
-import threading
+from contextvars import ContextVar
 from engine.context_manager import estimate_tokens
 
-_LOCAL = threading.local()
+_LEDGER = ContextVar('galam_usage_ledger', default=None)
 
 
 def start_task(conversation_id=None):
     data = {'conversation_id':conversation_id,'requests':[]}
-    _LOCAL.ledger = data
+    _LEDGER.set(data)
     from config import AGENT_STATE
     AGENT_STATE['usage_task'] = data
     return data
 
 
 def ledger():
-    if not hasattr(_LOCAL,'ledger'):
-        _LOCAL.ledger = {'conversation_id':None,'requests':[]}
-    return _LOCAL.ledger
+    # Framework executors copy ContextVars across worker boundaries. Share the
+    # current task ledger there, while independent /btw threads retain their own.
+    data=_LEDGER.get()
+    if data is None:
+        data={'conversation_id':None,'requests':[]}
+        _LEDGER.set(data)
+    return data
 
 
 def begin_request(endpoint,model,payload,delta=False):
@@ -67,13 +71,16 @@ def capture(response,data):
     cached = number(usage.get('cachedContentTokenCount'),prompt_details.get('cached_tokens'))
     counts = {'input_tokens':input_count,'output_tokens':output_count,'total_tokens':total,
               'reasoning_tokens':reasoning,'cached_input_tokens':cached}
-    if input_count is None and output_count is None:
+    if input_count is None and output_count is None and total is None:
         return
-    if total is None and input_count is not None and output_count is not None:
+    if total is not None:row['_reported_total']=True
+    if total is None and not row.get('_reported_total') and input_count is not None and output_count is not None:
         counts['total_tokens']=input_count+output_count
     for key,value in counts.items():
         if value is not None:
             row[key] = row.get(key,0)+value if row.get('_delta') else value
+    if total is None and not row.get('_reported_total') and all(isinstance(row.get(key),int) for key in ('input_tokens','output_tokens')):
+        row['total_tokens']=row['input_tokens']+row['output_tokens']
     row['usage_source']='provider'
 
 
@@ -95,12 +102,27 @@ def totals(stats=None):
     stats=snapshot() if stats is None else stats
     rows=stats['requests']
     if not rows:return {'source':'local','input':0,'output':0,'total':0,'requests':0}
-    measured=all(isinstance(row.get('input_tokens'),int) and isinstance(row.get('output_tokens'),int) for row in rows)
-    inputs=sum(row.get('input_tokens',row.get('estimated_input_tokens',0)) for row in rows)
-    outputs=[row.get('output_tokens',row.get('estimated_output_tokens')) for row in rows]
-    output=sum(outputs) if all(isinstance(value,int) for value in outputs) else None
-    return {'source':'provider' if measured else 'estimated','input':inputs,'output':output,
-            'total':inputs+output if output is not None else None,'requests':len(rows)}
+    def reported(row,key):
+        value=row.get(key)
+        return isinstance(value,int) and not isinstance(value,bool) and value>=0
+    measured=all(reported(row,'total_tokens') for row in rows)
+    def component(row,key,estimate):
+        if reported(row,key):return row[key]
+        # A total-only provider response cannot establish its component split.
+        if reported(row,'total_tokens'):return None
+        return row.get(estimate)
+    def combine(values):
+        return sum(values) if all(isinstance(value,int) for value in values) else None
+    inputs=combine([component(row,'input_tokens','estimated_input_tokens') for row in rows])
+    outputs=combine([component(row,'output_tokens','estimated_output_tokens') for row in rows])
+    totals=[]
+    for row in rows:
+        if reported(row,'total_tokens'):totals.append(row['total_tokens'])
+        else:
+            parts=[component(row,'input_tokens','estimated_input_tokens'),component(row,'output_tokens','estimated_output_tokens')]
+            totals.append(combine(parts))
+    return {'source':'provider' if measured else 'estimated','input':inputs,'output':outputs,
+            'total':combine(totals),'requests':len(rows)}
 
 
 def snapshot(start=0):

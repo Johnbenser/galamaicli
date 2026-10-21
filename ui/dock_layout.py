@@ -292,11 +292,9 @@ def completed_task_text():
     timing = AGENT_STATE.get('last_task_timing')
     if not timing:
         return ''
-    seconds = max(0,int(timing['elapsed']))
-    minutes, seconds = divmod(seconds,60)
-    label = 'Cancelled after' if timing.get('cancelled') else 'Worked for'
-    clock=time.strftime('%H:%M:%S',time.localtime(timing.get('finished_at',0)))
-    return f'{label} {minutes}m {seconds:02d}s • {clock}'
+    from engine.response_stats import summary
+    return summary(timing)
+
 
 def _thinking_active():
     if AGENT_STATE.get('abort',False):return False

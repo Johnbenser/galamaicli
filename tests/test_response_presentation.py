@@ -66,7 +66,7 @@ class ResponseAccountingTests(unittest.TestCase):
         totals=usage.totals()
         self.assertIsNone(totals['output']);self.assertIsNone(totals['total'])
         text=plain(footer({'elapsed':2,'finished_at':100,'usage':totals}))
-        self.assertIn('unavailable',text);self.assertIn('estimated',text)
+        self.assertIn('Total Token unavailable',text)
 
     def test_each_reply_has_frozen_metadata_and_is_restored_from_history(self):
         import galam
@@ -139,7 +139,7 @@ class ResponseAccountingTests(unittest.TestCase):
             self.assertEqual(len(answers),2)
             for answer in answers:
                 self.assertIn('Worked for',answer)
-                self.assertIn('23 total',plain(answer))
+                self.assertIn('Total Token 23',plain(answer))
             self.assertIs(usage.ledger(),main)
             self.assertEqual(len(main['requests']),0)
         finally:session.close();session.worker.join(1)

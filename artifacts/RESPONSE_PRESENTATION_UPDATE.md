@@ -1,5 +1,7 @@
 # Response presentation and completion — 21 October 2026
 
+> Footer/accounting follow-up: see [Total-token footer and workflow-cost review](TOTAL_TOKEN_FOOTER.md). Current footers show only duration, AM/PM completion time and Total Token; the report below records the earlier presentation work.
+
 ## Changes
 
 - The completion timestamp is captured once. Idle redraws no longer advance a completion clock.

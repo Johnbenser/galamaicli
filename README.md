@@ -40,7 +40,7 @@ Galam is its own assistant, with its own terminal interface, settings, action wo
 | **Conversation isolation** | A chat uses its own history. `/btw` has separate side-chat history and cancellation. |
 | **Readable progress** | One-word activity labels and a concise status accompany a continuously animated active task. Ctrl+O opens the supplied reasoning and execution trace. |
 | **Resumable work** | A full-screen conversation picker restores saved context and the working directory when available. |
-| **Honest completion** | Each task gets measured duration, a fixed completion time, and input/output token totals, with estimates labeled. |
+| **Honest completion** | Each task gets measured duration, a fixed AM/PM completion time, and one combined token total, with estimates marked `~`. |
 | **Local GGUF workflow** | Discover model files, save profiles, test connections, tune presets, and manage servers started by Galam. |
 
 > Model quality, speed, tool support, and usage reporting depend on the selected model and provider. Galam's workflow is designed to help smaller models stay grounded in real tool results; this repository does not claim a universal performance benchmark.
@@ -349,9 +349,7 @@ Responses render locally as bordered tables, section headings, hanging lists, nu
   │ .pdf │    89 │
   └──────┴───────┘
 
-  Worked for 0m 27s • 03:02:40
-  Tokens: 1,200 input + 340 output = 1,540
-  total (provider reported)
+  Worked for 0m 27s • 03:02:40 PM • Total Token 1,540
 ```
 
 *Illustrative layout, not a benchmark or a promise of usage for your requests.*
@@ -366,7 +364,7 @@ While a task is active, the animation continues during connection and stream wai
 
 Every new main-task response receives a permanent footer in scrollback and saved history. Side replies have their own per-question footer. The elapsed duration measures execution, excluding queue wait. Cancelled/failed tasks use explicit stopped labels.
 
-**Token accounting:** input + output = total across that task's model requests, including continuations and retries. Provider counts take precedence; missing counts are marked **estimated**, and unknown output is **unavailable**. Cached/reasoning subtotals are not added twice when already included. Counts are not billing estimates. Old conversations without saved measurements cannot retroactively recover them.
+**Token accounting:** the footer shows only **Total Token**, combined across that task's model requests, including continuations and retries. Explicit provider totals take precedence; approximate totals use **~**, and unknown totals show **unavailable**. Input/output details remain internal. Optional planning-graph workers share the parent task's usage ledger, while side-chat workers remain separate. Cached/reasoning subtotals are not added twice when already included. Counts are not billing estimates. Old conversations without saved measurements cannot retroactively recover them.
 
 ### Queue and cancellation
 
@@ -452,7 +450,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 271 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest recorded local result: 277 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Custom connection tests exercise all three API formats against a local HTTP fixture and execute a harmless real Bash action. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
 
 | Lab notes | Scope |
 |---|---|
@@ -465,6 +463,7 @@ python -m unittest discover -s tests -q
 | [Side chat and activity](artifacts/BTW_STATUS_RESUME_UPDATE.md) | `/btw`, progress labels and resume design |
 | [NVIDIA live check](artifacts/NVIDIA_CONNECTION_CHECK.md) | Authorized live requests, verified replies and unavailable models |
 | [Custom connections](artifacts/CUSTOM_CONNECTIONS.md) | Home storage, secret handling, UI and protocol verification |
+| [Total-token footer and workflow-cost review](artifacts/TOTAL_TOKEN_FOOTER.md) | Graph-worker accounting, compact status and plan overhead |
 | [Response presentation](artifacts/RESPONSE_PRESENTATION_UPDATE.md) | Frozen completion, permanent footers and rendering |
 | [Output preview](artifacts/RESPONSE_LAYOUT_PREVIEW.txt) | Plain-text example of the terminal layout |
 

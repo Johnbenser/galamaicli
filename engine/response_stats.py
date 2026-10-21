@@ -1,25 +1,27 @@
 """Permanent per-response completion metadata. No model requests."""
-import shutil
-import textwrap
 import time
 
 
 KEY='_galam_response_stats'
 
 
-def footer(stats,indent='  '):
+def summary(stats):
     duration=max(0,int(stats['elapsed']))
     minutes,seconds=divmod(duration,60)
-    status=stats.get('status','completed')
+    status=stats.get('status','cancelled' if stats.get('cancelled') else 'completed')
     label={'cancelled':'Cancelled after','failed':'Stopped after','incomplete':'Stopped after'}.get(status,'Worked for')
-    clock=time.strftime('%H:%M:%S',time.localtime(stats['finished_at']))
-    usage=stats['usage']
-    number=lambda value:f'{value:,}' if isinstance(value,int) else 'unavailable'
-    source={'provider':'provider reported','estimated':'estimated','local':'local; no API request'}[usage['source']]
-    detail=f"Tokens: {number(usage['input'])} input + {number(usage['output'])} output = {number(usage['total'])} total ({source})"
-    width=max(16,shutil.get_terminal_size((44,24)).columns-len(indent)-1)
-    lines=[f'{label} {minutes}m {seconds:02d}s • {clock}']+textwrap.wrap(detail,width=width)
-    return '\n'.join(indent+'\033[38;5;244m'+line+'\033[0m' for line in lines)
+    clock=time.strftime('%I:%M:%S %p',time.localtime(stats.get('finished_at',0)))
+    usage=stats.get('usage') or {}
+    total=usage.get('total')
+    if isinstance(total,int) and not isinstance(total,bool) and total>=0:
+        amount=('~' if usage.get('source')=='estimated' else '')+f'{total:,}'
+    else:amount='unavailable'
+    return f'{label} {minutes}m {seconds:02d}s • {clock} • Total Token {amount}'
+
+
+def footer(stats,indent='  '):
+    # One logical status line; the terminal wraps it without clipping values.
+    return indent+'\033[38;5;244m'+summary(stats)+'\033[0m'
 
 
 def attach(messages,stats,previous_assistants=()):
