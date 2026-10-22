@@ -87,6 +87,19 @@ class TaskManager:
                             os.kill(pid, signal.SIGKILL)
                         except Exception:
                             pass
+                    # Keep ownership until the tracked leader has actually stopped.
+                    # A slow/ignored SIGTERM must not leave an untracked service.
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            return False  # Retain ownership if the OS has not completed the stop.
                     t["process"] = None
                     self.tasks.remove(t)
                     return True
@@ -480,8 +493,8 @@ def python_curl(url: str, method: str = "GET", headers: dict = None, data: Any =
 
     # Try verified SSL first
     try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        options = {'context': ssl.create_default_context()} if urllib.parse.urlsplit(url).scheme.lower() == 'https' else {}
+        with urllib.request.urlopen(req, timeout=timeout, **options) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return body, resp.status
     except urllib.error.HTTPError as e:

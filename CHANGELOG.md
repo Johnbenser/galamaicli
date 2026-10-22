@@ -4,6 +4,13 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Service lifetime and explicit shutdown
+
+- Fixed successful background servers disappearing from task tracking when their launcher shell exited. A dedicated owned supervisor preserves the original command and follows its service group through nested launchers, checks, actual exit and explicit shutdown.
+- Preserved dynamic-port discovery, command reuse, readiness verification, cancellation and stopping only owned processes; added no model calls or project-specific startup rules.
+- Restricted natural-language shutdown to explicit, scoped requests. Negations/questions no longer stop servers, and ambiguous requests cannot stop every task.
+- Added real lifetime and shutdown-intent regressions. See [service lifetime evidence](artifacts/SERVICE_LIFETIME_REPAIR.md).
+
 ### Build completion and requested destinations
 
 - Fixed website/app implementations being marked complete after directory setup when the request also mentioned a folder.

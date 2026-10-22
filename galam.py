@@ -1381,18 +1381,14 @@ def main():
 
             # Natural language server termination intent (Python, React, Vite, Node, Next, etc.)
             clean_q = user_input.strip().lower()
-            is_server_kill_intent = bool(
-                re.search(r'\b(?:kill|stop|shut\s*down|terminate|close|kil)\b.*\b(?:server|process|py|python|react|vite|next|node|npm|app|service|port)\b', clean_q) or
-                re.search(r'\b(?:kill|stop|shut\s*down|terminate)\s+(?:all\s+)?(?:tasks?|background)\b', clean_q)
-            )
-            if is_server_kill_intent:
-                active_tasks = GLOBAL_TASK_MANAGER.get_active_tasks()
-                task_count = len(active_tasks)
-                GLOBAL_TASK_MANAGER.stop_all()
-                GLOBAL_TASK_MANAGER.stop_task("python")
-                GLOBAL_TASK_MANAGER.stop_task("vite")
-                GLOBAL_TASK_MANAGER.stop_task("node")
-                sys.stdout.write(f"\033[1;32m[✓] Decisively stopped all active background server tasks ({task_count} terminated).\033[0m\n\n")
+            from engine.server_stop import requested_stop_targets
+            stop_targets = requested_stop_targets(user_input, GLOBAL_TASK_MANAGER.get_active_tasks())
+            if stop_targets is not None:
+                if not stop_targets:
+                    sys.stdout.write("No single matching tracked server. Use /tasks to choose a task, PID or port, or explicitly request all servers.\n\n")
+                else:
+                    stopped = sum(GLOBAL_TASK_MANAGER.stop_task(pid, pid_only=True) for pid in stop_targets)
+                    sys.stdout.write(f"\033[1;32m[✓] Stopped {stopped} tracked background task(s).\033[0m\n\n")
                 sys.stdout.flush()
                 continue
 

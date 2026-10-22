@@ -6,6 +6,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import time
 import urllib.parse
 import uuid
@@ -92,9 +93,10 @@ def launch_process(command, directory, environment, manager, readiness_url='', t
         descriptor = os.open(log_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(descriptor, 'w') as output:
             environment = dict(environment, PYTHONUNBUFFERED='1')
-            process = subprocess.Popen(command, shell=True, cwd=directory, env=environment,
-                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-                start_new_session=True)
+            supervisor = str(Path(__file__).with_name('process_supervisor.py').resolve())
+            process = subprocess.Popen([sys.executable, '-u', supervisor, command],
+                cwd=directory, env=environment, stdin=subprocess.DEVNULL,
+                stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         entry = manager.register_task(command, process, command,
                                      str(urllib.parse.urlsplit(url).port or '') if url else '')
         entry.update(cwd=directory, log_path=str(log_path), readiness_url=url, state='starting')

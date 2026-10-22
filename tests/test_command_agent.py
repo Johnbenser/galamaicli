@@ -156,9 +156,12 @@ class CommandAgentTests(fixtures.Workspace):
         def release(stage,detail=''):
             update(stage,detail)
             if stage=='Building':(self.root/'release-build').touch()
-        with agent, patch.object(agent,'update',side_effect=release),patch.dict(CONFIG,{'server_build_timeout':15}):
-            result=launch_process(command,str(self.root),task_runner.get_subprocess_env(),self.manager,url,timeout=8)
-        self.assertTrue(result.success,result.output)
+        # Use the normal startup allowance on Android: this checks build visibility
+        # and the release handshake, rather than cold-start scheduling speed.
+        with agent, patch.object(agent,'update',side_effect=release),patch.dict(CONFIG,{'server_build_timeout':30}):
+            result=launch_process(command,str(self.root),task_runner.get_subprocess_env(),self.manager,url,timeout=30)
+        from engine.process_runner import log_tail
+        self.assertTrue(result.success,result.output + '\n' + log_tail(result.metadata['log_path']) + '\n' + repr(stages))
         self.assertIn('Building',stages)
         self.assertEqual(usage.ledger()['requests'],[])
 
