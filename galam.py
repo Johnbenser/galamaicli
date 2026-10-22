@@ -796,7 +796,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 break
             read_receipt = (last_tool_result and last_tool_result[0] == "view_file"
                             and last_tool_result[2] and not code_change_requested)
-            server_pending=requires_server and not any(event["tool"]=="execute_bash" and event["result"].success and event["result"].is_background for event in action_events)
+            server_pending=requires_server and not any(event["tool"]=="execute_bash" and event["result"].success and (event["result"].is_background or event["result"].verified and event["result"].metadata.get("startup_satisfied")) for event in action_events)
             unfinished = action_requested and (
                 server_pending or getattr(response_msg,"incomplete",False) or
                 not executed_commands or contract.missing() or code_change_requested and not code_change_completed
@@ -1236,7 +1236,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     "Call write_file with real content, or inspect and use replace_file_content. Do not claim completion.")})
                 continue
             if is_post_tool_turn:
-                if requires_server and not any(event['result'].success and event['result'].is_background for event in action_events):
+                if requires_server and not any(event['result'].success and (event['result'].is_background or event['result'].verified and event['result'].metadata.get('startup_satisfied')) for event in action_events):
                     continue
                 sys.stdout.write("\r\033[2K\n  \033[1;38;5;75m✦ Galam.ai Action Completed\033[0m\n\n")
                 sys.stdout.write("  \033[1;32m✓\033[0m \033[1;37mAction executed and verified with exit status 0.\033[0m\n\n")

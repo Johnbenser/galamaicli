@@ -1,0 +1,98 @@
+{
+  "conversation": "1a32524e",
+  "date": "2026-10-22",
+  "source_checkpoint_metrics": [
+    {
+      "requests": 24,
+      "tokens": 134862,
+      "status": "cancelled"
+    },
+    {
+      "requests": 17,
+      "tokens": 94709,
+      "status": "cancelled"
+    }
+  ],
+  "trials": [
+    {
+      "case": "already_running",
+      "endpoint": "Direct Endpoint",
+      "model": "minimax-m3.1-flash",
+      "passed": true,
+      "seconds": 84.24,
+      "usage": {
+        "source": "provider",
+        "input": 66699,
+        "output": 8547,
+        "total": 75246,
+        "requests": 16
+      },
+      "error": null,
+      "outcome": "completed",
+      "http": 200,
+      "source_unchanged": true,
+      "owned_services": 0,
+      "external_alive": true,
+      "profile_max_tokens": 1024,
+      "phase": "initial complete trials",
+      "commands": [
+        "cd <fixture>/already_running && ls -la dist",
+        "cd <fixture>/already_running && cat build.performed",
+        "cd <fixture>/already_running && npm run dev"
+      ],
+      "confinement_rejections": 8
+    },
+    {
+      "case": "fresh_build",
+      "endpoint": "Direct Endpoint",
+      "model": "minimax-m3.1-flash",
+      "passed": true,
+      "seconds": 28.55,
+      "usage": {
+        "source": "provider",
+        "input": 19103,
+        "output": 2330,
+        "total": 21433,
+        "requests": 6
+      },
+      "error": null,
+      "outcome": "completed",
+      "http": 200,
+      "source_unchanged": true,
+      "owned_services": 1,
+      "external_alive": null,
+      "profile_max_tokens": 1024,
+      "phase": "initial complete trials",
+      "commands": [
+        "npm run dev"
+      ],
+      "confinement_rejections": 2
+    },
+    {
+      "case": "already_running",
+      "endpoint": "Direct Endpoint",
+      "model": "minimax-m3.1-flash",
+      "passed": true,
+      "seconds": 30.95,
+      "usage": {
+        "source": "provider",
+        "input": 23373,
+        "output": 2766,
+        "total": 26139,
+        "requests": 7
+      },
+      "error": null,
+      "outcome": "completed",
+      "http": 200,
+      "source_unchanged": true,
+      "owned_services": 0,
+      "external_alive": true,
+      "profile_max_tokens": 1024,
+      "phase": "address hints",
+      "commands": [
+        "cd <fixture>/already_running && npm run dev"
+      ],
+      "confinement_rejections": 2
+    }
+  ]
+}

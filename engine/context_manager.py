@@ -233,10 +233,7 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
     last_guidance = {}
     for i in guidance:
         last_guidance[source[i].get('_galam_guidance','recovery')] = i
-    source = [m if i not in guidance or m.get('_galam_guidance') in ('protocol','command_failure') else {**m, 'content':
-        '[Workflow recovery] Use retained evidence. Choose a different useful action toward the original goal; '
-        'unchanged inspections do not establish completion. Existing review decisions still apply.'}
-        for i,m in enumerate(source) if i not in guidance or i in last_guidance.values()]
+    source = [m for i,m in enumerate(source) if i not in guidance or i in last_guidance.values()]
     window, output, margin = model_limits(endpoint, model, config)
     schema_tokens = max(0, int(config.get('_tool_schema_tokens', 0)))
     budget = window - output - margin - schema_tokens

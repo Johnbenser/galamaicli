@@ -57,7 +57,7 @@ def validate_shell_command(command: str) -> Tuple[bool, str]:
     shell = _without_heredocs(command)
     visible = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', ' DATA ', shell)
     quoted_path = re.search(r'''\bcd\s+(?:--\s+)?(['"])(<[^>]+>|your_project_name|project_name_here)\1''', shell, re.I)
-    if quoted_path or re.search(r'(?i)(?:your_project_name|project_name_here|replace_this|<[^>]+>|\bTODO\b)', visible):
+    if quoted_path or re.search(r'(?i)(?:your_project_name|project_name_here|replace_this|<[A-Za-z_][^>;&|\n]*>|\bTODO\b)', visible):
         return False, "the command contains a placeholder rather than a real project path"
     first = command.split("&&", 1)[0].splitlines()[0].strip()
     if not _looks_like_shell_command(first):

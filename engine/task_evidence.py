@@ -42,7 +42,9 @@ def package_evidence(tool, args, output, directory, goal, source_id):
             manager = 'npm'
         return {'script': selected, 'command': redact(scripts[selected]),
                 'invoke': manager + ' run ' + shlex.quote(selected), 'cwd': str(source_path.parent),
-                'source_path': str(source_path), 'source_id': source_id}
+                'source_path': str(source_path), 'source_id': source_id,
+                'selection': 'explicit user command' if preferred else 'candidate; choose using project instructions',
+                'alternatives': {key:scripts[key] for key in ('dev','start','serve','preview') if key in scripts and key != selected}}
     return None
 
 
@@ -67,9 +69,11 @@ def legacy_launch(state):
 def render_evidence(state, limit):
     launch = state.get('launch') or legacy_launch(state)
     rows = []
+    if state.get('attempted_launch'):
+        rows.append('Actual attempted launch (preserve its chain unless correcting an observed error): ' + json.dumps(state['attempted_launch'],ensure_ascii=False))
     if launch:
         # Keep the selected fact whole. Old receipts must not displace its middle.
-        rows.append('Observed package scripts — selected launch evidence: ' + json.dumps(launch, ensure_ascii=False))
+        rows.append('Observed package scripts — launch evidence: ' + json.dumps(launch, ensure_ascii=False))
     for fact in reversed(state.get('facts', [])[-3:]):
         if sum(len(row) + 1 for row in rows) + len(fact) <= limit:
             rows.append(fact)

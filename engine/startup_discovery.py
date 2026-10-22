@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import re
+import tempfile
+import os
 from engine.security import redact, sensitive_path
 from engine.result_store import archive_context
 
@@ -23,7 +25,7 @@ def discover(request, current_directory):
     target=target.resolve()
     if not target.is_dir():
         return None
-    content=f'Project directory: {target}\n'
+    content=f'Project directory: {target}\nRuntime temporary directory: {tempfile.gettempdir()} (do not assume /tmp is writable).\n'
     package=target/'package.json'
     result={'directory':str(target)}
     try:
@@ -37,6 +39,15 @@ def discover(request, current_directory):
             common={k:v for k,v in scripts.items() if k in ('dev','start','serve','preview','build')}
             content+=f'Manifest: {package}; original action {reference}\n'
             content+=redact(json.dumps({'packageManager':parsed.get('packageManager'),'scripts':common,'available_scripts':list(scripts)},ensure_ascii=False))+'\n'
+            from engine.server_commands import configured_port
+            manager = str(parsed.get('packageManager') or 'npm').split('@',1)[0]
+            if manager not in ('npm','pnpm','yarn','bun'):
+                manager = 'npm'
+            ports = {configured_port(f'{manager} run {name}',scripts,{'PORT':os.environ.get('PORT','')})
+                     for name in common if name != 'build'} - {None}
+            if ports:
+                content += ('Observed configured local address hints: ' + ', '.join(f'http://127.0.0.1:{port}/' for port in sorted(ports))
+                            + '. Derived from project scripts/current PORT, not proof of readiness. Preserve these unless the user requests an override or an observed conflict requires another address.\n')
             result.update(package=original,source_id=reference,path=str(package))
     except (OSError,ValueError,TypeError,AttributeError):
         pass

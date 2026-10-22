@@ -4,6 +4,13 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Startup correctness and existing services
+
+- Investigated `1a32524e`: a healthy external server could not satisfy startup because completion required a new owned launch. Match actual served project HTML and referenced local assets, report external readiness honestly, and preserve ownership boundaries. Exact commands, builds/restarts and additional checks retain their execution requirements.
+- Label default manifest recipes as candidates, preserve alternatives and actual attempted build/start chains, retain useful latest recovery evidence, and stop recommending a new launch after readiness is verified.
+- Add observed address/current PORT and runtime temporary-directory hints; preserve explicit overrides and conflict recovery without permanent port assignments. Accept real stdin redirection while still rejecting placeholder paths.
+- Handle missing legacy inspection paths and record resolved paths for future successful file observations. Added fourteen regressions; all 425 tests passed without skips. Selected-model live trials verified existing-service reuse and a correct fresh build/start. See [evidence and limitations](artifacts/STARTUP_CORRECTNESS_REPAIR.md).
+
 ### Adaptive builder stress testing and lower-waste recovery
 
 - Added a reproducible live six-stage builder evaluation: diagnose/repair, HTML creation, exact edits, broken build/start recovery, read-only follow-up and cross-model handoff. Independent files/tests/HTTP/process ownership determine success; provider quota and experiment stops remain explicit.

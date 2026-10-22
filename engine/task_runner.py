@@ -443,6 +443,8 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
             result = as_result(_execute_tool_call_legacy(tool_name, args, invoking_model))
     except Exception as error:
         result = ActionResult(f"Error: {error}", False, 1, status="failed")
+    if tool_name == 'view_file' and result.success:
+        result.metadata['path'] = resolve_session_path(args['path'])
     from engine.security import redact
     result.output = redact(result.output)
     result = store_result(result)
@@ -768,7 +770,7 @@ def _execute_shell_action_legacy(cmd: str, allow_credentials=False, background=F
             timeout=CONFIG.get('server_startup_timeout', 30))
         if navigation_target and result.is_background:
             AGENT_STATE['working_directory'] = navigation_target
-        if result.success and result.metadata.get('url'):
+        if result.success and result.is_background and result.metadata.get('url') and result.metadata.get('pid'):
             actual_port = str(urllib.parse.urlsplit(result.metadata['url']).port or '')
             print_server_card(clean_cmd, actual_port, result.metadata['pid'])
         return result

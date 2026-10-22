@@ -126,9 +126,14 @@ class TaskProgress:
             return None
         self.pending_recovery = False
         from engine.task_evidence import render_evidence
-        next_action = ('\nThe launch recipe is already observed. Propose a reviewed execute_bash call with background=true '
-                       'to launch it, or identify a specific unresolved prerequisite. More unrelated source/listing reads '
-                       'do not advance startup.\n' + render_evidence(self.state, 900)) if self.service_goal and self.state.get('launch') else ''
+        if self.state.get('service_ready'):
+            next_action = ('\nReadiness is already verified: ' + json.dumps(self.state['service_ready']) +
+                           '. Finish only remaining explicit current-request requirements and report the observed result. '
+                           'Do not launch another process or invent more checks.')
+        else:
+            next_action = ('\nUse the observed launch evidence to choose the command matching this request, preserving '
+                           'its build/start chain. Inspect only a specific unresolved prerequisite. A matching existing '
+                           'service can satisfy readiness without claiming a new launch.\n' + render_evidence(self.state, 900)) if self.service_goal and self.state.get('launch') else ''
         return {'role': 'user', '_galam_internal': True, '_galam_guidance': 'recovery', 'content':
             '[Workflow recovery] Recent rounds repeated known evidence. Use a different approach toward '
             'the original goal; do not repeat listings or archive retrieval. If blocked, explain the actual '
@@ -162,13 +167,20 @@ class TaskProgress:
                 normalized = listing
         from engine.task_evidence import package_evidence
         launch = package_evidence(tool, args, text, directory, self.state['goal'], result.action_id) if result.success else None
+        if tool == 'execute_bash':
+            from engine.server_commands import server_invocation
+            if args.get('background') or server_invocation(args.get('command','')):
+                self.state['attempted_launch'] = {'command':redact(args.get('command','')),
+                    'cwd':str(directory), 'status':result.status, 'success':result.success, 'source_id':result.action_id}
         old_launch = self.state.get('launch')
         changed_recipe = bool(launch and any(launch.get(key) != (old_launch or {}).get(key)
                                              for key in ('command', 'cwd', 'script')))
         if launch:
             self.state['launch'] = launch
             normalized = 'launch recipe: ' + json.dumps({key: value for key, value in launch.items() if key != 'source_id'}, sort_keys=True)
-        milestone = changed_recipe or bool(result.is_background and result.success)
+        if result.success and result.verified and (result.is_background or result.metadata.get('startup_satisfied')):
+            self.state['service_ready'] = {k:result.metadata[k] for k in ('url','readiness','owned','existing_service') if k in result.metadata}
+        milestone = changed_recipe or bool(result.success and (result.is_background or result.metadata.get('startup_satisfied')))
         signature = hashlib.sha256((str(result.success) + normalized.strip()).encode()).hexdigest()
         seen = self.state['seen']
         if signature not in seen:

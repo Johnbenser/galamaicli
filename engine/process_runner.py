@@ -109,6 +109,17 @@ def launch_process(command, directory, environment, manager, readiness_url='', t
     if process is None:
         # A responding unrelated server never proves the requested command started.
         if url and listening(url):
+            from engine.service_observation import observe_existing, reuse_allowed
+            inspected = [m['_galam_action'].get('path') for m in agent.messages
+                         if m.get('_galam_action',{}).get('tool') == 'view_file'
+                         and m['_galam_action'].get('status') == 'completed' and m['_galam_action'].get('path')] if agent else []
+            observed = observe_existing(url, directory, inspected) if agent and reuse_allowed(agent.goal) else None
+            if observed:
+                return ActionResult(f"Already running at {observed['url']}. Verified served bytes against "
+                    f"project files: {', '.join(observed['matched_files'])}. "
+                    "This was a read-only verification: the proposed command was not executed and no process was started. "
+                    "The external service is not owned or controlled by this session.",
+                    verified=True, metadata=observed)
             return ActionResult(f'Error: Readiness address {url} is already occupied by an unowned service. '
                                 'No new process started; choose a different port or inspect the existing service.', False, 1)
         log_path = runtime_dir('processes') / (uuid.uuid4().hex + '.log')
