@@ -1,0 +1,1617 @@
+{
+  "date": "2026-10-22",
+  "baseline_commit": "ffe73c2",
+  "local_endpoint_excluded": true,
+  "production_limits_changed": false,
+  "trials": [
+    {
+      "primary": [
+        "Groq",
+        "openai/gpt-oss-20b"
+      ],
+      "handoff": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 163.42,
+      "first_action_seconds": 0.983,
+      "profile": null,
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Baseline",
+      "requests": 23,
+      "provider_usage_requests": 12,
+      "provider_known_input": 27408,
+      "provider_known_output": 1417,
+      "provider_known_total": 28825,
+      "http_429_attempts": 11,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 1,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": true,
+          "status": "failed",
+          "error": null,
+          "seconds": 37.6,
+          "usage": {
+            "source": "estimated",
+            "input": 21311,
+            "output": null,
+            "total": null,
+            "requests": 9
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 6
+        },
+        {
+          "stage": "create",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": true,
+          "status": "failed",
+          "error": null,
+          "seconds": 118.25,
+          "usage": {
+            "source": "estimated",
+            "input": 49513,
+            "output": null,
+            "total": null,
+            "requests": 12
+          },
+          "actions": 4,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 234
+          },
+          "proposals": 4
+        },
+        {
+          "stage": "edit",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment token allowance reached; production settings unchanged",
+          "seconds": 7.4,
+          "usage": {
+            "source": "estimated",
+            "input": 10048,
+            "output": null,
+            "total": null,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": false,
+            "other_files_unchanged": true
+          },
+          "proposals": 1
+        }
+      ]
+    },
+    {
+      "primary": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "handoff": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "passed": false,
+      "elapsed_seconds": 58.72,
+      "first_action_seconds": 1.36,
+      "profile": null,
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Baseline",
+      "requests": 15,
+      "provider_usage_requests": 0,
+      "provider_known_input": null,
+      "provider_known_output": null,
+      "provider_known_total": null,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 1,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 40.96,
+          "usage": {
+            "source": "estimated",
+            "input": 21112,
+            "output": 999,
+            "total": 22111,
+            "requests": 6
+          },
+          "actions": 6,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 6
+        },
+        {
+          "stage": "create",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "experiment_stopped",
+          "error": "Experiment token allowance reached; production settings unchanged",
+          "seconds": 17.65,
+          "usage": {
+            "source": "estimated",
+            "input": 60615,
+            "output": 1365,
+            "total": 61980,
+            "requests": 9
+          },
+          "actions": 7,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 373
+          },
+          "proposals": 8
+        }
+      ]
+    },
+    {
+      "primary": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "handoff": [
+        "Groq",
+        "openai/gpt-oss-20b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 123.03,
+      "first_action_seconds": 1.448,
+      "profile": null,
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Baseline",
+      "requests": 18,
+      "provider_usage_requests": 18,
+      "provider_known_input": 66977,
+      "provider_known_output": 14480,
+      "provider_known_total": 81457,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 0,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 9.9,
+          "usage": {
+            "source": "provider",
+            "input": 11717,
+            "output": 562,
+            "total": 12279,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "create",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "experiment_stopped",
+          "error": "Experiment token allowance reached; production settings unchanged",
+          "seconds": 113.03,
+          "usage": {
+            "source": "provider",
+            "input": 55260,
+            "output": 13918,
+            "total": 69178,
+            "requests": 12
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 2
+        }
+      ]
+    },
+    {
+      "primary": [
+        "Groq",
+        "openai/gpt-oss-20b"
+      ],
+      "handoff": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 83.78,
+      "first_action_seconds": 0.84,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Contract/context repair",
+      "requests": 18,
+      "provider_usage_requests": 10,
+      "provider_known_input": 18372,
+      "provider_known_output": 716,
+      "provider_known_total": 19088,
+      "http_429_attempts": 8,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 0,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 45.69,
+          "usage": {
+            "source": "estimated",
+            "input": 23164,
+            "output": null,
+            "total": null,
+            "requests": 10
+          },
+          "actions": 6,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 7
+        },
+        {
+          "stage": "create",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": false,
+          "status": "failed",
+          "error": null,
+          "seconds": 13.46,
+          "usage": {
+            "source": "estimated",
+            "input": 8263,
+            "output": null,
+            "total": null,
+            "requests": 4
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 0
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "passed": false,
+          "status": "blocked_by_missing_created_file"
+        },
+        {
+          "stage": "startup",
+          "endpoint": "Groq",
+          "model": "openai/gpt-oss-20b",
+          "passed": false,
+          "status": "failed",
+          "error": null,
+          "seconds": 24.48,
+          "usage": {
+            "source": "estimated",
+            "input": 13704,
+            "output": null,
+            "total": null,
+            "requests": 4
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": null,
+            "url": "",
+            "owned_processes": 0,
+            "owner_pid": null,
+            "served_expected_content": false
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "followup",
+          "passed": false,
+          "status": "blocked_by_missing_running_service"
+        },
+        {
+          "stage": "handoff",
+          "passed": false,
+          "status": "blocked_by_missing_running_service"
+        }
+      ]
+    },
+    {
+      "primary": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "handoff": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "passed": false,
+      "elapsed_seconds": 37.35,
+      "first_action_seconds": 1.072,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Contract/context repair",
+      "requests": 20,
+      "provider_usage_requests": 0,
+      "provider_known_input": null,
+      "provider_known_output": null,
+      "provider_known_total": null,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 2,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 12.07,
+          "usage": {
+            "source": "estimated",
+            "input": 19706,
+            "output": 862,
+            "total": 20568,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "create",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.17,
+          "usage": {
+            "source": "estimated",
+            "input": 7968,
+            "output": 389,
+            "total": 8357,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "edit",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.87,
+          "usage": {
+            "source": "estimated",
+            "input": 15519,
+            "output": 391,
+            "total": 15910,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "startup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment token allowance reached; production settings unchanged",
+          "seconds": 15.99,
+          "usage": {
+            "source": "estimated",
+            "input": 33278,
+            "output": 616,
+            "total": 33894,
+            "requests": 7
+          },
+          "actions": 7,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": null,
+            "url": "",
+            "owned_processes": 0,
+            "owner_pid": null,
+            "served_expected_content": false
+          },
+          "proposals": 7
+        }
+      ]
+    },
+    {
+      "primary": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "handoff": [
+        "Groq",
+        "openai/gpt-oss-20b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 73.34,
+      "first_action_seconds": 1.36,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 80000,
+        "stage_seconds": 180
+      },
+      "phase": "Contract/context repair",
+      "requests": 25,
+      "provider_usage_requests": 25,
+      "provider_known_input": 79475,
+      "provider_known_output": 2530,
+      "provider_known_total": 82005,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 5,
+      "confinement_denials": 0,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 7.24,
+          "usage": {
+            "source": "provider",
+            "input": 6242,
+            "output": 507,
+            "total": 6749,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "create",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 3.27,
+          "usage": {
+            "source": "provider",
+            "input": 2510,
+            "output": 199,
+            "total": 2709,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 2.68,
+          "usage": {
+            "source": "provider",
+            "input": 5562,
+            "output": 134,
+            "total": 5696,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "startup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment token allowance reached; production settings unchanged",
+          "seconds": 59.94,
+          "usage": {
+            "source": "provider",
+            "input": 65161,
+            "output": 1690,
+            "total": 66851,
+            "requests": 16
+          },
+          "actions": 7,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": null,
+            "url": "",
+            "owned_processes": 0,
+            "owner_pid": null,
+            "served_expected_content": false
+          },
+          "proposals": 11
+        }
+      ]
+    },
+    {
+      "primary": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "handoff": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "passed": false,
+      "elapsed_seconds": 207.52,
+      "first_action_seconds": 0.966,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Syntax diagnosis trial",
+      "requests": 15,
+      "provider_usage_requests": 0,
+      "provider_known_input": null,
+      "provider_known_output": null,
+      "provider_known_total": null,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 0,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 11.52,
+          "usage": {
+            "source": "estimated",
+            "input": 19603,
+            "output": 836,
+            "total": 20439,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "create",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.6,
+          "usage": {
+            "source": "estimated",
+            "input": 4966,
+            "output": 379,
+            "total": 5345,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 509
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 11.08,
+          "usage": {
+            "source": "estimated",
+            "input": 10122,
+            "output": 217,
+            "total": 10339,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "startup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment stage deadline reached; not a production step limit",
+          "seconds": 180.09,
+          "usage": {
+            "source": "estimated",
+            "input": 18488,
+            "output": 450,
+            "total": 18938,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": null,
+            "url": "",
+            "owned_processes": 1,
+            "owner_pid": 12805,
+            "served_expected_content": false
+          },
+          "proposals": 4
+        }
+      ]
+    },
+    {
+      "primary": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "handoff": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 197.45,
+      "first_action_seconds": 1.857,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Syntax diagnosis trial",
+      "requests": 47,
+      "provider_usage_requests": 47,
+      "provider_known_input": 245024,
+      "provider_known_output": 3675,
+      "provider_known_total": 248699,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 7,
+      "confinement_denials": 0,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 7.2,
+          "usage": {
+            "source": "provider",
+            "input": 6161,
+            "output": 444,
+            "total": 6605,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "create",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.1,
+          "usage": {
+            "source": "provider",
+            "input": 2599,
+            "output": 413,
+            "total": 3012,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 5.39,
+          "usage": {
+            "source": "provider",
+            "input": 6391,
+            "output": 326,
+            "total": 6717,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "startup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment stage deadline reached; not a production step limit",
+          "seconds": 180.53,
+          "usage": {
+            "source": "provider",
+            "input": 229873,
+            "output": 2492,
+            "total": 232365,
+            "requests": 38
+          },
+          "actions": 27,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": null,
+            "url": "",
+            "owned_processes": 1,
+            "owner_pid": 16611,
+            "served_expected_content": false
+          },
+          "proposals": 31
+        }
+      ]
+    },
+    {
+      "primary": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "handoff": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "passed": false,
+      "elapsed_seconds": 167.59,
+      "first_action_seconds": 0.935,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Read-only defect discovery",
+      "requests": 66,
+      "provider_usage_requests": 0,
+      "provider_known_input": null,
+      "provider_known_output": null,
+      "provider_known_total": null,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 9,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 9.13,
+          "usage": {
+            "source": "estimated",
+            "input": 19685,
+            "output": 856,
+            "total": 20541,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "create",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.54,
+          "usage": {
+            "source": "estimated",
+            "input": 7991,
+            "output": 397,
+            "total": 8388,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "edit",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 10.34,
+          "usage": {
+            "source": "estimated",
+            "input": 15612,
+            "output": 365,
+            "total": 15977,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "startup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 38.66,
+          "usage": {
+            "source": "estimated",
+            "input": 78528,
+            "output": 1238,
+            "total": 79766,
+            "requests": 13
+          },
+          "actions": 10,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "url": "http://127.0.0.1:39377/",
+            "owned_processes": 1,
+            "owner_pid": 19785,
+            "served_expected_content": true
+          },
+          "proposals": 12
+        },
+        {
+          "stage": "followup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": false,
+          "status": "experiment_stopped",
+          "error": "Experiment stage deadline reached; not a production step limit",
+          "seconds": 104.5,
+          "usage": {
+            "source": "estimated",
+            "input": 414948,
+            "output": null,
+            "total": null,
+            "requests": 40
+          },
+          "actions": 38,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "source_unchanged": true,
+            "answer_has_address": false
+          },
+          "proposals": 39
+        }
+      ],
+      "note": "Follow-up deliberately interrupted after intent defect was diagnosed; SIGALRM uses the generic deadline label in raw evidence."
+    },
+    {
+      "primary": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "handoff": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "passed": false,
+      "elapsed_seconds": 84.14,
+      "first_action_seconds": 1.286,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Read-only defect discovery",
+      "requests": 44,
+      "provider_usage_requests": 22,
+      "provider_known_input": 53456,
+      "provider_known_output": 1928,
+      "provider_known_total": 55384,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 9,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 11.53,
+          "usage": {
+            "source": "provider",
+            "input": 8397,
+            "output": 252,
+            "total": 8649,
+            "requests": 5
+          },
+          "actions": 4,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 4
+        },
+        {
+          "stage": "create",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 4.88,
+          "usage": {
+            "source": "provider",
+            "input": 4684,
+            "output": 534,
+            "total": 5218,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "edit",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 5.53,
+          "usage": {
+            "source": "provider",
+            "input": 11006,
+            "output": 374,
+            "total": 11380,
+            "requests": 4
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "startup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 12.22,
+          "usage": {
+            "source": "provider",
+            "input": 14207,
+            "output": 416,
+            "total": 14623,
+            "requests": 5
+          },
+          "actions": 4,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "url": "http://127.0.0.1:40155/",
+            "owned_processes": 1,
+            "owner_pid": 22014,
+            "served_expected_content": true
+          },
+          "proposals": 4
+        },
+        {
+          "stage": "followup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": false,
+          "status": "completed",
+          "error": null,
+          "seconds": 5.78,
+          "usage": {
+            "source": "provider",
+            "input": 15162,
+            "output": 352,
+            "total": 15514,
+            "requests": 5
+          },
+          "actions": 3,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "source_unchanged": false,
+            "answer_has_address": true
+          },
+          "proposals": 3
+        },
+        {
+          "stage": "handoff",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 43.68,
+          "usage": {
+            "source": "estimated",
+            "input": 229194,
+            "output": 2390,
+            "total": 231584,
+            "requests": 22
+          },
+          "actions": 19,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "served_exact_edit": true,
+            "same_owner": true
+          },
+          "proposals": 21
+        }
+      ]
+    },
+    {
+      "primary": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "handoff": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "passed": true,
+      "elapsed_seconds": 71.42,
+      "first_action_seconds": 0.902,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Verified matrix",
+      "requests": 35,
+      "provider_usage_requests": 5,
+      "provider_known_input": 37647,
+      "provider_known_output": 308,
+      "provider_known_total": 37955,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 4,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 10.5,
+          "usage": {
+            "source": "estimated",
+            "input": 19512,
+            "output": 758,
+            "total": 20270,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "create",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 3.4,
+          "usage": {
+            "source": "estimated",
+            "input": 4990,
+            "output": 364,
+            "total": 5354,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 557
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 3.26,
+          "usage": {
+            "source": "estimated",
+            "input": 10131,
+            "output": 226,
+            "total": 10357,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "startup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 44.61,
+          "usage": {
+            "source": "estimated",
+            "input": 127300,
+            "output": 2141,
+            "total": 129441,
+            "requests": 18
+          },
+          "actions": 16,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "url": "http://127.0.0.1:38273/",
+            "owned_processes": 1,
+            "owner_pid": 24173,
+            "served_expected_content": true
+          },
+          "proposals": 16
+        },
+        {
+          "stage": "followup",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 1.02,
+          "usage": {
+            "source": "estimated",
+            "input": 2294,
+            "output": 67,
+            "total": 2361,
+            "requests": 1
+          },
+          "actions": 0,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "source_unchanged": true,
+            "answer_has_address": true
+          },
+          "proposals": 0
+        },
+        {
+          "stage": "handoff",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 8.24,
+          "usage": {
+            "source": "provider",
+            "input": 37647,
+            "output": 308,
+            "total": 37955,
+            "requests": 5
+          },
+          "actions": 4,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "served_exact_edit": true,
+            "same_owner": true
+          },
+          "proposals": 4
+        }
+      ]
+    },
+    {
+      "primary": [
+        "Direct",
+        "codestral-latest"
+      ],
+      "handoff": [
+        "NVIDIA",
+        "nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "passed": true,
+      "elapsed_seconds": 43.24,
+      "first_action_seconds": 1.429,
+      "profile": {
+        "max_tokens": 4096,
+        "stream": true,
+        "command_agent": true,
+        "token_optimization": null
+      },
+      "experiment_only": {
+        "token_allowance": 0,
+        "stage_seconds": 180
+      },
+      "phase": "Verified matrix",
+      "requests": 27,
+      "provider_usage_requests": 17,
+      "provider_known_input": 36187,
+      "provider_known_output": 1572,
+      "provider_known_total": 37759,
+      "http_429_attempts": 0,
+      "malformed_text_proposals": 0,
+      "confinement_denials": 2,
+      "stages": [
+        {
+          "stage": "repair",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 7.68,
+          "usage": {
+            "source": "provider",
+            "input": 8846,
+            "output": 484,
+            "total": 9330,
+            "requests": 5
+          },
+          "actions": 4,
+          "protected_unchanged": true,
+          "evidence": {
+            "independent_test_exit": 0,
+            "model_executed_tests": true
+          },
+          "proposals": 4
+        },
+        {
+          "stage": "create",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 3.78,
+          "usage": {
+            "source": "provider",
+            "input": 2616,
+            "output": 437,
+            "total": 3053,
+            "requests": 2
+          },
+          "actions": 1,
+          "protected_unchanged": true,
+          "evidence": {
+            "bytes": 324
+          },
+          "proposals": 1
+        },
+        {
+          "stage": "edit",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 6.37,
+          "usage": {
+            "source": "provider",
+            "input": 6513,
+            "output": 281,
+            "total": 6794,
+            "requests": 3
+          },
+          "actions": 2,
+          "protected_unchanged": true,
+          "evidence": {
+            "exact_replacement": true,
+            "other_files_unchanged": true
+          },
+          "proposals": 2
+        },
+        {
+          "stage": "startup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 12.17,
+          "usage": {
+            "source": "provider",
+            "input": 16825,
+            "output": 305,
+            "total": 17130,
+            "requests": 6
+          },
+          "actions": 5,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "url": "http://127.0.0.1:38321/",
+            "owned_processes": 1,
+            "owner_pid": 25634,
+            "served_expected_content": true
+          },
+          "proposals": 5
+        },
+        {
+          "stage": "followup",
+          "endpoint": "Direct",
+          "model": "codestral-latest",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 1.08,
+          "usage": {
+            "source": "provider",
+            "input": 1387,
+            "output": 65,
+            "total": 1452,
+            "requests": 1
+          },
+          "actions": 0,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "source_unchanged": true,
+            "answer_has_address": true
+          },
+          "proposals": 0
+        },
+        {
+          "stage": "handoff",
+          "endpoint": "NVIDIA",
+          "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+          "passed": true,
+          "status": "completed",
+          "error": null,
+          "seconds": 11.71,
+          "usage": {
+            "source": "estimated",
+            "input": 58473,
+            "output": 1161,
+            "total": 59634,
+            "requests": 10
+          },
+          "actions": 9,
+          "protected_unchanged": true,
+          "evidence": {
+            "http_status": 200,
+            "served_exact_edit": true,
+            "same_owner": true
+          },
+          "proposals": 9
+        }
+      ]
+    }
+  ],
+  "context_comparison": {
+    "before": {
+      "metrics": {
+        "estimated": true,
+        "input_tokens": 2461,
+        "input_with_tools": 2461,
+        "input_budget": 27034,
+        "window": 32768,
+        "reserved_output": 4096,
+        "tool_schema_tokens": 0,
+        "messages_selected": 3,
+        "messages_available": 3,
+        "code_outline": false,
+        "compacted_messages": 0,
+        "recall_used": false,
+        "context_limit_source": "configuration"
+      },
+      "old_receipt_selected": true,
+      "message_count": 4
+    },
+    "after": {
+      "metrics": {
+        "estimated": true,
+        "input_tokens": 137,
+        "input_with_tools": 137,
+        "input_budget": 27034,
+        "window": 32768,
+        "reserved_output": 4096,
+        "tool_schema_tokens": 0,
+        "messages_selected": 1,
+        "messages_available": 3,
+        "code_outline": false,
+        "compacted_messages": 0,
+        "recall_used": false,
+        "context_limit_source": "configuration"
+      },
+      "old_receipt_selected": false,
+      "message_count": 2
+    }
+  },
+  "entire_experiment": {
+    "requests": 353,
+    "provider_usage_requests": 156,
+    "provider_known_input": 564546,
+    "provider_known_output": 26626,
+    "provider_known_total": 591172,
+    "non_provider_usage_requests": 197,
+    "http_429_attempts": 19,
+    "exact_entire_total": null,
+    "note": "Includes failed/diagnostic trials and handoffs. Other requests have estimates or unavailable usage; this known subtotal is not an exact overall bill."
+  }
+}

@@ -639,7 +639,10 @@ If an action fails, use its real error to choose a corrective step. Keep unfinis
     from engine.action_results import request_intent
     from engine.context_manager import latest_request
     if request_intent(latest_request(messages))[0]:
-        identity_prompt += response_contract(native=bool(protocol))
+        from engine.context_manager import is_user_request
+        human = max((i for i,m in enumerate(messages) if is_user_request(m)), default=-1)
+        xml = any(m.get('_galam_text_syntax') == 'xml' for m in messages[human+1:])
+        identity_prompt += response_contract(native=bool(protocol), xml=xml and not protocol)
     enforced, usage = assemble_context(context_messages, identity_prompt, active_ep, active_m, context_config, working_directory)
     if track_usage:
         AGENT_STATE["context_usage"] = usage
@@ -652,7 +655,7 @@ def build_enforced_messages(messages, active_ep, active_m, native_tools=True, tr
     if not enabled(CONFIG, 'prompts'):
         return _legacy_build_enforced_messages(messages, active_ep, active_m, native_tools, track_usage)
     from storage.conversations import scoped_messages
-    from engine.context_manager import assemble_context, estimate_tokens, latest_request, contextual_action
+    from engine.context_manager import assemble_context, estimate_tokens, latest_request, contextual_action, is_user_request
     from engine.action_results import request_intent
     from engine.action_instructions import response_contract
     from engine.prompt_context import identity
@@ -667,10 +670,13 @@ def build_enforced_messages(messages, active_ep, active_m, native_tools=True, tr
     if not re.search(r'\b(?:go|navigate|find|directory|folder|cd)\b', query, re.I):
         snapshot = snapshot.split('\nNearby directories:', 1)[0]
     protocol = tool_options(active_ep, active_m, messages, CONFIG) if native_tools else {}
+    background_context = action or bool(re.search(r'\b(?:server|service|tasks?|background|port|address|running)\b', query, re.I))
     prompt = identity(active_ep, active_m, load_model_rules(active_m).get('system_instruction',''),
-                      action, directory, snapshot, GLOBAL_TASK_MANAGER.get_active_tasks() if action else ())
+                      action, directory, snapshot, GLOBAL_TASK_MANAGER.get_active_tasks() if background_context else ())
     if action:
-        prompt += response_contract(bool(protocol))
+        human = max((i for i,m in enumerate(messages) if is_user_request(m)), default=-1)
+        xml = any(m.get('_galam_text_syntax') == 'xml' for m in messages[human+1:])
+        prompt += response_contract(bool(protocol), xml=xml and not protocol)
     context_config = dict(CONFIG, _tool_schema_tokens=estimate_tokens(protocol)+96 if protocol else 0,
                           _recall_messages=messages)
     context_messages = wire_messages(messages) if protocol else wire_text_messages(messages)

@@ -6,6 +6,7 @@ import re
 from engine.result_store import compact_text
 from engine.repo_context import repository_context
 from engine.api_protocols import retain_reasoning
+from engine.conversation_constraints import constraint_clauses
 
 
 class ContextLimitError(ValueError):
@@ -227,12 +228,12 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
     from engine.prompt_context import observation_content
     source = scoped_messages(messages)
     # Guidance is replaceable generated state, never another user requirement.
-    guidance = [i for i,m in enumerate(source) if m.get('_galam_guidance') in ('recovery','protocol') or
+    guidance = [i for i,m in enumerate(source) if m.get('_galam_guidance') in ('recovery','protocol','command_failure') or
                 m.get('_galam_internal') and str(m.get('content','')).startswith('[Workflow recovery]')]
     last_guidance = {}
     for i in guidance:
         last_guidance[source[i].get('_galam_guidance','recovery')] = i
-    source = [m if i not in guidance or m.get('_galam_guidance')=='protocol' else {**m, 'content':
+    source = [m if i not in guidance or m.get('_galam_guidance') in ('protocol','command_failure') else {**m, 'content':
         '[Workflow recovery] Use retained evidence. Choose a different useful action toward the original goal; '
         'unchanged inspections do not establish completion. Existing review decisions still apply.'}
         for i,m in enumerate(source) if i not in guidance or i in last_guidance.values()]
@@ -314,7 +315,7 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
     from engine.command_agent import active_agent
     worker = active_agent()
     recall_source = worker.recall_source if worker else config.get('_recall_messages',source)
-    constraint_reserve = estimate_tokens('\n'.join(line for i in humans[:-1] for line in rows[i]['content'].splitlines() if _CONSTRAINT.search(line)))
+    constraint_reserve = estimate_tokens('\n'.join(clause for i in humans[:-1] for clause in constraint_clauses(rows[i]['content'])))
     recalled = recall(recall_source, query, max(0,remaining-constraint_reserve), estimate_tokens,
                       '\n'.join(rows[i]['content'] for i in mandatory),
                       fits=lambda packet: base_cost(base+packet)+required+constraint_reserve+64 <= budget)
@@ -325,10 +326,26 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
     starts = humans[:-1] if humans else []
     units = [(start, set(range(start, humans[n+1]))) for n,start in enumerate(starts)]
     paths = set(re.findall(r'[\w./-]+\.[A-Za-z0-9_]+',query.lower()))
+    # Explicit new file tasks use fresh inspections. Old task transcripts remain
+    # available to conditional recall, without automatically reissuing their work.
+    references_history = bool(re.search(r'\b(?:earlier|previous|same|again|continue|before|last)\b', query, re.I))
+    # Pronouns after an explicitly introduced file usually refer to that file
+    # ("Create page.html. Its title ..."), rather than an older task.
+    first_path = re.search(r'[\w./-]+\.[A-Za-z0-9_]+', query)
+    if first_path:
+        references_history = references_history or bool(re.search(
+            r'\b(?:that|those|it|its|this)\b', query[:first_path.start()], re.I))
+    from engine.action_results import request_intent
+    independent_file_task = bool(paths and request_intent(query)[0] and not continuation and not references_history)
     optional = []
     for position, (start, group) in reversed(list(enumerate(units))):
         text = ' '.join(rows[i]['content'] for i in group).lower()
-        relevant = (not recalled and position >= len(units)-2) or any(path in text for path in paths)
+        from engine.conversation_recall import terms
+        prior_action = request_intent(rows[start]['content'])[0]
+        factual_match = not prior_action and bool(terms(query) & terms(rows[start]['content']))
+        path_match = any(path in text for path in paths)
+        relevant = (not independent_file_task or not prior_action or path_match) and (
+            (not recalled and position >= len(units)-2) or any(path in text for path in paths) or factual_match)
         size = cost(group)
         if relevant and not group & chosen and size <= remaining:
             chosen.update(group);remaining -= size;optional.append(group)
@@ -338,8 +355,8 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
         for index in humans[:-1]:
             if index in chosen:
                 continue
-            for line in rows[index]['content'].splitlines():
-                if _CONSTRAINT.search(line) and line.strip() not in seen:
+            for line in constraint_clauses(rows[index]['content']):
+                if line.strip() not in seen:
                     kept.append(line.strip());seen.add(line.strip())
         return ('\n\nEARLIER USER CONSTRAINTS (latest instructions take precedence):\n'+'\n'.join(kept)) if kept else ''
     memory = notes()

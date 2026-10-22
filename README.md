@@ -498,7 +498,7 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest verification: 388 checks covered, with no skips; 387 passed in the full run and one existing queue-cancellation timing case passed on an isolated rerun.** See [service lifetime verification](artifacts/SERVICE_LIFETIME_REPAIR.md) for the exact results. This includes productive work beyond the old request/token caps, context recovery, conditional recall, action contracts, file edits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting and security checks. Real startup tests cover build-then-Python, Python HTTP, Node, Make, Flask and Vite with a React JSX module. The recorded run supplied `GALAM_TEST_VITE` (an installed Vite entrypoint) and `GALAM_TEST_FLASK_PATH` (a Flask package directory); those two integrations skip when their fixture paths are unset. Fixtures do not add production dependencies.
+**Latest verification: all 411 tests passed in one full run, with no skips (106.075 seconds).** See the [adaptive stress report](artifacts/ADAPTIVE_STRESS_RESULTS.md) for live cross-model results, measured usage, shared fixes and limitations. This includes productive work beyond the old request/token caps, context recovery, conditional recall, action contracts, file edits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting and security checks. Real startup tests cover build-then-Python, Python HTTP, Node, Make, Flask and Vite with a React JSX module. The recorded run supplied `GALAM_TEST_VITE` (an installed Vite entrypoint) and `GALAM_TEST_FLASK_PATH` (a Flask package directory); those two integrations skip when their fixture paths are unset. Fixtures do not add production dependencies.
 
 A separate live pilot using `minimax-m3.1-flash` on Direct Endpoint successfully served a build/Python project and a Vite project, with independent HTTP content checks. It used eight requests and 23,577 provider-reported tokens in total. This demonstrates those two cases, not universal model reliability or token savings. See the [implementation report](artifacts/CONTINUATION_RECALL_IMPLEMENTATION.md).
 
@@ -508,6 +508,8 @@ A separate live pilot using `minimax-m3.1-flash` on Direct Endpoint successfully
 | [Launch repair](artifacts/LAUNCH_WORKFLOW_REPAIR.md) | Replaced failed command compaction/recovery and unified process execution |
 | [Command Agent](artifacts/COMMAND_AGENT.md) | Same-model startup delegation, below-input stages, repairs and shared accounting |
 | [Continuation and recall implementation](artifacts/CONTINUATION_RECALL_IMPLEMENTATION.md) | New conversation failures, startup routing, context recovery and measured live pilot |
+| [Adaptive builder stress plan](artifacts/ADAPTIVE_STRESS_PLAN.md) | Six user-style challenges, model handoff and independent acceptance |
+| [Adaptive stress results](artifacts/ADAPTIVE_STRESS_RESULTS.md) | Live trials, failures, token evidence and model-independent fixes |
 | [Coding stress plan](artifacts/VIBE_CODING_STRESS_PLAN.md) | Realistic multi-turn scenarios, independent acceptance and bounded live pilot |
 | [Progress and security](artifacts/PROGRESS_SECURITY.md) | Renewable work, task spending, audit checks and user identity |
 | [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |

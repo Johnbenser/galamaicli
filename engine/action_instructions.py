@@ -1,7 +1,7 @@
 """One response contract, independent of provider and model family."""
 
 
-def response_contract(native=False):
+def response_contract(native=False, xml=False):
     workflow = (
         "\nGALAM ACTION RESPONSE CONTRACT (takes precedence over family formatting preferences):\n"
         "Use real tools and their results; never simulate execution or repeat completed actions. "
@@ -20,10 +20,17 @@ def response_contract(native=False):
         return workflow + "Use the supplied function schema. Put arguments in the native call; do not print XML, JSON examples or Bash fences instead.\n"
     from engine.tool_registry import TOOLS
     signatures = '; '.join(name+'('+','.join(arguments)+')' for name,arguments in TOOLS.items())
+    if xml:
+        return workflow + 'Available tools: '+signatures+'\n' + (
+            'No native interface is supplied. Emit one complete <invoke name="TOOL_NAME">'
+            '<parameter name="ARGUMENT_NAME">literal value</parameter></invoke> per response. '
+            'Include each required argument as its own parameter. Parameter text is literal: keep code quotes '
+            'and backslashes unchanged. Use a unique inspected replacement block without parameter closing tags. '
+            'Wait for the real tool observation before the next action. No Markdown fences.\n')
     return workflow + 'Available tools: '+signatures+'\n' + (
         "No native function interface is supplied. Emit exactly one complete call per response in "
         "<tool_call>...</tool_call>, with valid JSON and double-quoted keys/strings. Close the tag, "
-        "escape newlines as \\n inside JSON strings, and wait for the observation before the next call. "
+        "escape embedded quotes/backslashes and newlines as \\n inside JSON strings, and wait for the observation before the next call. "
         "Do not wrap calls in Markdown fences. These examples show syntax only; use the user's actual paths and content:\n"
         '<tool_call>{"name":"write_file","arguments":{"path":"example.txt","content":"complete content"}}</tool_call>\n'
         '<tool_call>{"name":"view_file","arguments":{"path":"example.txt"}}</tool_call>\n'

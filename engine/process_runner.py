@@ -69,6 +69,28 @@ def readiness(url):
     return 'starting', f'HTTP {status}' if status > 0 else ''
 
 
+def announced_url(tail, current=''):
+    """Use owned launch output to correct an unresponsive address hint."""
+    found = list(re.finditer(r'(?:https?|tcp)://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\[::\]):\d+(?:/[\w./-]*)?', tail))
+    candidate = ''
+    for match in reversed(found):
+        try:
+            candidate = local_url(match[0])
+            break
+        except ValueError:
+            continue  # Startup output is untrusted; ignore invalid listener URLs.
+    if not candidate:
+        return ''
+    if current:
+        original = urllib.parse.urlsplit(current)
+        actual = urllib.parse.urlsplit(candidate)
+        # A supplied health path remains meaningful when the listener port changes.
+        if original.path not in ('', '/') or original.query:
+            candidate = urllib.parse.urlunsplit((actual.scheme, actual.netloc,
+                original.path or '/', original.query, ''))
+    return candidate
+
+
 def launch_process(command, directory, environment, manager, readiness_url='', timeout=30):
     """Never start a second copy of this command just because readiness is pending."""
     directory = str(Path(directory).resolve())
@@ -133,17 +155,21 @@ def launch_process(command, directory, environment, manager, readiness_url='', t
                     deadline = min(absolute_deadline, build_deadline if phase == 'building' else time.monotonic() + startup_allowance)
                     entry['state'] = phase
                     notify('Building' if phase == 'building' else 'Starting')
-            if not url:
-                # Many custom launchers announce their actual address rather than accept --port.
-                found = re.search(r'(?:https?|tcp)://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|\[::\]):\d+(?:/[\w./-]*)?', tail)
-                if found:
-                    url = local_url(found[0])
-                    entry['readiness_url'] = url
-                    entry['port'] = str(urllib.parse.urlsplit(url).port)
+            announced = announced_url(tail, url)
+            if not url and announced:
+                url = announced
+                entry['readiness_url'] = url
+                entry['port'] = str(urllib.parse.urlsplit(url).port)
             if url:
                 if phase != 'building':
                     notify('Verifying')
                 state, detail = readiness(url)
+                if state == 'starting' and announced and announced != url:
+                    observed_state, observed_detail = readiness(announced)
+                    if observed_state in ('ready', 'auth_required'):
+                        url, state, detail = announced, observed_state, observed_detail
+                        entry['readiness_url'] = url
+                        entry['port'] = str(urllib.parse.urlsplit(url).port)
                 if state in ('ready', 'auth_required'):
                     entry['state'] = state
                     notify('Running')

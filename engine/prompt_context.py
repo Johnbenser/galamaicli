@@ -19,7 +19,9 @@ def identity(endpoint, model, custom, action, directory, snapshot='', tasks=()):
         text += 'LIVE WORKSPACE SNAPSHOT:\n' + snapshot + '\n'
     if tasks:
         text += 'ACTIVE BACKGROUND TASKS:\n' + '\n'.join(
-            f"ID {t['id']}; PID {t['pid']}; port {t.get('port','5500')}; {compact_text(t['cmd'],180)}"
+            f"ID {t['id']}; PID {t['pid']}; port {t.get('port') or 'unknown'}; {compact_text(t['cmd'],180)}"
+            + (f"; state: {t['state']}" if t.get('state') else '')
+            + (f"; url: {t['readiness_url']}" if t.get('readiness_url') else '')
             + (f"; log: {t['log_path']}" if t.get('log_path') else '')
             for t in tasks) + '\n'
     return text

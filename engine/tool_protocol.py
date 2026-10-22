@@ -1,4 +1,4 @@
-"""One tool contract for compatible APIs, bounded repair, and text fallback."""
+"""One tool contract for compatible APIs, guided repair, and text fallback."""
 import json
 import re
 from engine.tool_registry import TOOLS, REQUIRED
@@ -110,14 +110,36 @@ def needs_clarification(text):
 
 
 class ActionRepair:
-    """Change the protocol once; do not repeat the same no-progress exchange."""
+    """Diagnose failed action syntax without executing guessed arguments."""
     def __init__(self):
         self.responses = set()
+        self.syntax_failures = set()
 
     def next_message(self, request, response, progress):
         signature = (progress, re.sub(r"\s+", " ", response).strip().lower())
         repeated = signature in self.responses
         self.responses.add(signature)
+        diagnostic = ''
+        xml = False
+        block = re.search(r'<tool_call>(.*?)</tool_call>', response, re.S | re.I)
+        if block:
+            try:
+                json.loads(block[1])
+            except json.JSONDecodeError as error:
+                name = re.search(r'"name"\s*:\s*"([a-z_]+)"', block[1])
+                signature = (name[1] if name else '', error.msg)
+                xml = signature in self.syntax_failures
+                self.syntax_failures.add(signature)
+                diagnostic = (f"\nRejected tool JSON: {error.msg} at line {error.lineno}, column {error.colno}. "
+                              "This proposed action was NOT executed; its claimed changes are unverified. "
+                              "Correct and resend that action before dependent commands. Escape embedded double quotes "
+                              "and backslashes in JSON strings, or use a shorter unique inspected replacement block.")
+        if xml:
+            return {"role":"user", "_galam_internal":True, "_galam_guidance":"protocol",
+                    "_galam_tool_mode":"required", "_galam_force_text_tools":True, "_galam_text_syntax":"xml",
+                    "content":"[Action protocol repair] Repeated invalid JSON; no proposed edit was executed. "
+                              "Use the supplied XML parameter interface instead. Resend the failed edit with exact inspected "
+                              "content before retrying dependent commands. Preserve unrelated code and review decisions."}
         return {"role": "user", "_galam_internal": True, "_galam_guidance":"protocol", "_galam_tool_mode": "required", "content": (
             "[Action protocol repair] The task is not complete. No complete tool call was returned for the remaining task. "
             "Do not repeat an announcement. Use the tool interface now. If native tools are unavailable, "
@@ -125,7 +147,7 @@ class ActionRepair:
             "Choose a real tool and all required arguments from the available contract. "
             "Use literal file content, not undefined shell variables. Preserve unrelated files. "
             "If essential input is missing, ask one concrete question rather than guessing. "
-            f"Original request: {request}" + ('\nThe same announcement already failed. Change the action format or inspect the specific blocker; do not repeat it.' if repeated else ''))}
+            + diagnostic + ('\nThe same announcement already failed. Change the action format or inspect the specific blocker; do not repeat it.' if repeated else ''))}
 
 
 def wire_text_messages(messages):

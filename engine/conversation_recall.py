@@ -9,7 +9,8 @@ _STOP = set('a an the my your our this that those these it its is are was were b
 
 
 def terms(text):
-    return {word for word in re.findall(r'[\w./-]+', str(text).lower()) if len(word)>2 and word not in _STOP}
+    return {word for raw in re.findall(r'[\w./-]+', str(text).lower())
+            if len(word := raw.rstrip('.')) > 2 and word not in _STOP}
 
 
 def recall(messages, query, token_budget, estimate, selected_text='', fits=None):

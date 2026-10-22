@@ -5,7 +5,7 @@ import re
 
 from engine.action_results import request_intent, requires_content
 
-_TOKEN = re.compile(r'''`([^`]+)`|"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s]+)''')
+_TOKEN = re.compile(r'''`([^`]+)`|"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s,;]+|[,;])''')
 _CREATE = {'create', 'make', 'write', 'touch', 'build', 'generate'}
 _FILL = {'a', 'an', 'the', 'new', 'empty', 'blank', 'named', 'called', 'sibling', 'dedicated'}
 _PREP = {'on', 'in', 'at', 'under', 'inside', 'to'}
@@ -20,14 +20,18 @@ class TaskContract:
         self.complete_scope = False
         if not request_intent(request)[0]:
             return
-        # Negated clauses describe constraints, not outputs to create.
-        if re.search(r"\b(?:do not|don't|never)\b", request, re.I):
-            return
         tokens = []
+        boundaries = set()
         for match in _TOKEN.finditer(request):
             value = next(v for v in match.groups() if v is not None)
             quoted = match.group(4) is None
+            if not quoted and value in (',', ';'):
+                if tokens:
+                    boundaries.add(len(tokens)-1)
+                continue
             tokens.append((value if quoted else value.rstrip('.,;'), quoted))
+            if not quoted and value.endswith(('.', ',', ';')):
+                boundaries.add(len(tokens)-1)
         if not any(t.lower() in _CREATE for t, quoted in tokens if not quoted):
             return
         bases = []
@@ -39,16 +43,30 @@ class TaskContract:
         base = bases[0] if bases and all(p == bases[0] for p in bases) else Path(directory)
         self.base = base.resolve()
         clauses, current = [], []
-        for value, quoted in tokens:
-            if not quoted and value.lower() in ('and', 'then', 'also'):
-                if current:
-                    clauses.append(current);current = []
+        negated = False
+        def append_clause():
+            nonlocal current, negated
+            if not current:
+                return
+            prose = ' '.join(value for value, quoted in current if not quoted)
+            negated = negated or bool(re.search(r"\b(?:do not|don't|never)\b", prose, re.I))
+            clauses.append((current, negated))
+            current = []
+        for position, (value, quoted) in enumerate(tokens):
+            if not quoted and value.lower() in ('and', 'then', 'also', 'but'):
+                append_clause()
+                if value.lower() == 'but':
+                    negated = False
             else:
                 current.append((value, quoted))
-        if current:
-            clauses.append(current)
+            if position in boundaries and current:
+                append_clause()
+                negated = False
+        append_clause()
         known_values = {value for value, quoted in tokens if quoted or value.startswith(('/', '~/'))}
-        for clause in clauses:
+        for clause, negated in clauses:
+            if negated:
+                continue
             lower = [v.lower() for v, _ in clause]
             kind, target = None, None
             # Only the object of a creation verb (or an immediately coordinated
@@ -78,7 +96,7 @@ class TaskContract:
                     index += 1
                 if index < len(clause) and lower[index] == 'for' and index + 1 < len(clause) and clause[index + 1][1]:
                     index += 1
-                if index < len(clause) and (clause[index][1] or lower[index] not in _PREP | {'for', 'containing', 'with', 'content', 'about', 'that', 'which', 'structure', 'tree'}):
+                if index < len(clause) and (clause[index][1] or any(word in ('named', 'called') for word in lower[:index]) or lower[index] not in _PREP | {'for', 'containing', 'with', 'content', 'about', 'that', 'which', 'structure', 'tree', 'not', 'it', 'them', 'this', 'these', 'those', 'one', 'ones'}):
                     target = clause[index][0]
             if target:
                 known_values.add(target)

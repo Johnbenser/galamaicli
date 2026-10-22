@@ -639,6 +639,9 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
     action_requested, code_change_requested = request_intent(current_request)
     from engine.context_manager import contextual_action
     action_requested = action_requested or contextual_action(messages)
+    read_only_scope = not action_requested and bool(re.search(
+        r"\b(?:do not|don't|never)\b[^.;\n]*\b(?:stop|restart|modify|edit|change|delete|write|create)\b",
+        current_request, re.I))
     repair = ActionRepair()
     contract = TaskContract(current_request, session_directory())
     from engine.server_commands import server_start_requested
@@ -901,6 +904,17 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     f"The {tool_name} tool arguments are invalid: {validation_error}. "
                     "Inspect the current workspace and provide a valid tool call.")})
                 continue
+
+            if read_only_scope:
+                from engine.execution_policy import is_safe_read
+                allowed = is_safe_read(tool_name, args) or (
+                    tool_name == 'manage_tasks' and args.get('action', 'list') in ('list','inspect','status'))
+                if not allowed:
+                    rejected_in_this_step = True
+                    messages.append({'role':'user', '_galam_internal':True, '_galam_tool_mode':'none',
+                        'content':'[Read-only request] This action was not executed. The current user request prohibits changes. '
+                                  'Answer from existing evidence or use read-only file/task inspection; do not edit, build, start or stop anything.'})
+                    continue
 
             mismatch = contract.guard(tool_name, args, session_directory())
             if mismatch:
@@ -1211,7 +1225,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             if last_tool_result and not last_tool_result[2]:
                 if not workflow.stop_reason:
                     messages.append({
-                        "role": "user",
+                        "role": "user", "_galam_internal": True,
                         "content": "The last tool failed and this tool call repeats a previous attempt. Inspect the error and try a different corrective action.",
                     })
                     continue

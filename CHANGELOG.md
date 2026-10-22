@@ -4,6 +4,16 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Adaptive builder stress testing and lower-waste recovery
+
+- Added a reproducible live six-stage builder evaluation: diagnose/repair, HTML creation, exact edits, broken build/start recovery, read-only follow-up and cross-model handoff. Independent files/tests/HTTP/process ownership determine success; provider quota and experiment stops remain explicit.
+- Fixed grammatical references being mistaken for required output filenames, which kept already completed pages in forced recovery. Preserved quoted filenames, literals, output types and positive vs negated clauses.
+- Carry restriction clauses instead of reissuing completed tasks. Fresh named-file tasks omit unrelated action transcripts while preserving relevant facts, same-file context, original history, continuation, user rules and conditional recall. Scoped edit restrictions no longer become permanent global rules.
+- Fixed coordinated prohibitions being classified as mutation requests. Explicit non-action requests that prohibit changes enforce read-only tools even in Always Proceed mode. Generated retry feedback stays internal.
+- Diagnose malformed action JSON without executing guesses; repeated syntax errors can switch the current task to the existing XML parameter parser. Preserved source, review and execution checks; removed redundant original-request copies from recovery.
+- Reuse actual tracked service state/URL for relevant follow-ups. Recover an unresponsive readiness hint from a verified local address announced by the owned process, retaining health paths and rejecting malformed/external hints. Repeated startup failures receive coalesced evidence-based guidance without a retry cap.
+- All 411 local regressions passed in one run with no skips. See [adaptive stress results](artifacts/ADAPTIVE_STRESS_RESULTS.md) for live outcomes and measurement limits. Production caps, UI, settings design and dependencies are unchanged.
+
 ### Service lifetime and explicit shutdown
 
 - Fixed successful background servers disappearing from task tracking when their launcher shell exited. A dedicated owned supervisor preserves the original command and follows its service group through nested launchers, checks, actual exit and explicit shutdown.
