@@ -355,9 +355,8 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
     # 7. LOCAL ENDPOINT (llama.cpp / Ollama / Localhost)
     if endpoint_name == "Local Endpoint":
         from config import CONFIG
-        from engine.local_models import local_base_url
-        base_url = local_base_url(CONFIG)
-        url = f"{base_url}/chat/completions"
+        from engine.local_models import local_chat_url
+        url = local_chat_url(CONFIG)
         api_key = get_endpoint_api_key("Local Endpoint")
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

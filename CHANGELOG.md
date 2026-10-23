@@ -4,6 +4,13 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Configure and navigate local model servers
+
+- Restructured only the Local Models flow into Server Connection, Model Profiles, Tuning, and connection testing, with back navigation returning to the relevant local screen.
+- Added an inline local server editor for the URL (including host and port), `GET` model-list path, and `POST` chat path. The defaults remain `/v1/models` and `/v1/chat/completions`; paths are validated and saved through the existing settings store, with an in-place save confirmation and route preview.
+- Applied the saved routes consistently to model discovery, test requests, and real local chat requests. Connection testing checks these two routes directly, so a compatible server does not also need to expose `/health`.
+- Added regression coverage for defaults, custom routes, saved ports, navigation, and normal chat URL selection. The full suite passed **435 tests**, no skips (123.978 seconds).
+
 ### Keep successful simple actions when a summary response fails
 
 - Investigated a folders-list request that executed `ls -la` correctly but ended as “task incomplete” because a second, redundant model acknowledgment request failed. Verified single-command folder/directory listings now return names directly from the successful output without another model call.

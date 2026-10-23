@@ -180,7 +180,7 @@ export LOCAL_ENDPOINT_URL="http://127.0.0.1:8080/v1"
 python galam.py
 ```
 
-The default is `http://127.0.0.1:8080/v1`. A saved endpoint address takes precedence over the environment fallback. Galam discovers the running server's model IDs; model weights and a server binary are not bundled. For a server on another machine, use that machine's reachable address rather than `localhost`.
+The default is `http://127.0.0.1:8080/v1`. In `/settings` → **Local Models** → **Server Connection**, set the server URL (including its port) and the routes Galam should call. Defaults are `GET /v1/models` and `POST /v1/chat/completions`; both paths can be customized for another OpenAI-compatible server. **Test connection** checks those configured routes and sends a small chat request. Saved settings take precedence over `LOCAL_ENDPOINT_URL`. Galam connects to a running server; model weights and a server binary are not bundled. For a server on another machine, use its reachable address rather than `localhost`.
 
 ### GGUF profiles and owned servers
 
@@ -188,7 +188,7 @@ Open `/settings` → **Local Models** → **+ Add model** to scan home directori
 
 | Command | Purpose |
 |---|---|
-| `/local test` | Background health, model-match, and tiny-chat checks; displays latency and approximate throughput. |
+| `/local test` | Background model-list and tiny-chat checks; displays latency and approximate throughput. |
 | `/local command` | Show the selected profile's llama-server command. |
 | `/local start` | Start a selected profile on a free loopback port. |
 | `/local restart` | Restart only a server Galam started and can still identify. |

@@ -63,7 +63,7 @@ class InlineSettingsApp:
                 }
                 for m in models
             ]
-        elif self.screen in ("local", "local_add", "local_result"):
+        elif self.screen in ("local", "local_profiles", "local_tuning", "local_add", "local_result"):
             return self.local_screens.items(self.screen)
         return []
 
@@ -157,13 +157,15 @@ class InlineSettingsApp:
                     self.screen = "main"
                     self.cursor_idx = 1
 
-            elif self.screen in ("local", "local_add", "local_result"):
+            elif self.screen in ("local", "local_profiles", "local_tuning", "local_add", "local_result"):
                 destination = self.local_screens.enter(item, event.app.invalidate)
                 if item.get("action") in ("local_activate", "local_add_profile"):
                     self.selected_ep = CONFIG.get("active_endpoint", self.selected_ep)
                 if destination:
                     self.screen = destination
                     self.cursor_idx = 0
+                    if destination == "local_server_editor":
+                        self.open_local_server_editor(event.app)
 
             event.app.invalidate()
 
@@ -172,7 +174,11 @@ class InlineSettingsApp:
         @self.kb.add('c-c')
         def _back(event):
             if self.screen in ("local_add", "local_result"):
-                self.local_screens.enter({"action": "local_back"}, event.app.invalidate)
+                destination = self.local_screens.enter({"action": "local_back"}, event.app.invalidate)
+                self.screen = destination or "local"
+                self.cursor_idx = 0
+                event.app.invalidate()
+            elif self.screen in ("local_profiles", "local_tuning"):
                 self.screen = "local"
                 self.cursor_idx = 0
                 event.app.invalidate()
@@ -185,7 +191,8 @@ class InlineSettingsApp:
 
     def page_title(self):
         return {'main':'Workspace settings','endpoints':'Choose endpoint','models':'Choose model',
-                'local':'Local models','local_add':'Select GGUF','local_result':'Local model status'}.get(self.screen,'Settings')
+                'local':'Local models','local_profiles':'Local model profiles','local_tuning':'Local model tuning',
+                'local_add':'Select GGUF','local_result':'Local model status'}.get(self.screen,'Settings')
 
     def get_formatted_text(self):
         """Original compact ten-line menu, with cell-safe rows on narrow terminals."""
@@ -198,7 +205,8 @@ class InlineSettingsApp:
                 result+=char
             return result
         title={'main':'Galam.AI Settings','endpoints':'Select Endpoint','models':'Select Model ['+self.selected_ep+']',
-               'local':'Local Models','local_add':'Select GGUF','local_result':'Local Model Status'}.get(self.screen,'Settings')
+               'local':'Local Models','local_profiles':'Model Profiles','local_tuning':'Local Tuning',
+               'local_add':'Select GGUF','local_result':'Local Model Status'}.get(self.screen,'Settings')
         lines=[('class:title',crop('╭── '+title,width)+'\n')]
         start=max(0,min(self.cursor_idx-3,len(items)-7))
         for index,item in enumerate(items[start:start+7],start):
@@ -234,15 +242,28 @@ class InlineSettingsApp:
         app.layout.focus(self.editor.endpoint_button if self.editor.page=='form' else self.editor.body)
         app.invalidate()
 
+    def close_local_server_editor(self):
+        self.screen='local'
+        self.cursor_idx=0
+        self.app.layout.focus(self.menu_window)
+        self.app.invalidate()
+
+    def open_local_server_editor(self,app):
+        from ui.local_server_editor import LocalServerEditor
+        self.editor=LocalServerEditor(CONFIG,save_settings,self.close_local_server_editor)
+        self.editor.app=app
+        app.layout.focus(self.editor.fields['url'])
+        app.invalidate()
+
     def build_application(self):
         from ui.settings_theme import SETTINGS_STYLE
         self.menu_window=Window(FormattedTextControl(self.get_formatted_text),height=10,wrap_lines=False)
         root=HSplit([self.menu_window])
         keys=merge_key_bindings([
-            ConditionalKeyBindings(self.kb,Condition(lambda:self.screen!='connections')),
+            ConditionalKeyBindings(self.kb,Condition(lambda:self.screen not in ('connections','local_server_editor'))),
             ConditionalKeyBindings(DynamicKeyBindings(lambda:self.editor.key_bindings if hasattr(self,'editor') else None),
-                                   Condition(lambda:self.screen=='connections'))])
-        app=Application(layout=Layout(DynamicContainer(lambda:self.editor.root if self.screen=='connections' else root)),
+                                   Condition(lambda:self.screen in ('connections','local_server_editor')))])
+        app=Application(layout=Layout(DynamicContainer(lambda:self.editor.root if self.screen in ('connections','local_server_editor') else root)),
                         key_bindings=keys,style=SETTINGS_STYLE,full_screen=False,erase_when_done=True,mouse_support=False)
         app.ttimeoutlen=.1
         self.app=app

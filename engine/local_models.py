@@ -3,7 +3,25 @@
 import os
 from urllib.request import Request, urlopen
 import json
+from urllib.parse import urlsplit
 _MODEL_INFO = {}
+
+DEFAULT_MODELS_PATH = "/v1/models"
+DEFAULT_CHAT_PATH = "/v1/chat/completions"
+
+
+def local_endpoint_origin(config):
+    """Return configured local server origin, preserving its explicit host/port."""
+    from storage.endpoints import ENDPOINT_REGISTRY
+    base = (config.get("local_endpoint_url") or os.environ.get("LOCAL_ENDPOINT_URL")
+            or ENDPOINT_REGISTRY["Local Endpoint"]["base_url"]).rstrip("/")
+    for suffix in ("/chat/completions", "/models"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+    if base.endswith("/models"):
+        base = base[:-len("/models")]
+    parsed = urlsplit(base)
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def local_base_url(config):
@@ -11,11 +29,34 @@ def local_base_url(config):
 
     base = (config.get("local_endpoint_url") or os.environ.get("LOCAL_ENDPOINT_URL")
             or ENDPOINT_REGISTRY["Local Endpoint"]["base_url"]).rstrip("/")
-    if base.endswith("/chat/completions"):
-        base = base[:-len("/chat/completions")]
+    for suffix in ("/chat/completions", "/models"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
     if not base.endswith("/v1"):
         base += "/v1"
     return base
+
+
+def _local_route(config, key, default):
+    route = str(config.get(key) or default).strip()
+    if (not route.startswith("/") or route.startswith("//") or "\\" in route
+            or any(ord(char) < 32 for char in route) or "?" in route or "#" in route):
+        raise ValueError(f"{key} must be a path beginning with / and contain no query or fragment.")
+    return route
+
+
+def local_models_url(config):
+    from urllib.parse import urlsplit
+    base_path = urlsplit(local_base_url(config)).path.rstrip("/") or "/v1"
+    default = (base_path if base_path != "/" else "") + "/models"
+    return local_endpoint_origin(config) + _local_route(config, "local_models_path", default)
+
+
+def local_chat_url(config):
+    from urllib.parse import urlsplit
+    base_path = urlsplit(local_base_url(config)).path.rstrip("/") or "/v1"
+    default = (base_path if base_path != "/" else "") + "/chat/completions"
+    return local_endpoint_origin(config) + _local_route(config, "local_chat_path", default)
 
 
 def discover_local_models(config, api_key="", timeout=3):
@@ -23,7 +64,7 @@ def discover_local_models(config, api_key="", timeout=3):
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = Request(local_base_url(config) + "/models", headers=headers)
+    request = Request(local_models_url(config), headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:
             data = json.load(response)

@@ -3,7 +3,7 @@ import os
 import shlex
 import time
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import requests
 
@@ -122,11 +122,8 @@ def test_connection(profile=None, config=None, timeout=180, session=None):
     config = config or {}
     if not enabled(config):
         return {"ok": False, "steps": [], "diagnosis": "Local model manager is disabled."}
-    from engine.local_models import local_base_url
+    from engine.local_models import local_models_url, local_chat_url
     from engine.payload_builder import get_endpoint_api_key
-    parsed = urlsplit(local_base_url(config))
-    origin = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
-    api = local_base_url(config)
     headers = {"Accept": "application/json"}
     key = get_endpoint_api_key("Local Endpoint")
     if key:
@@ -134,35 +131,32 @@ def test_connection(profile=None, config=None, timeout=180, session=None):
     http = session or requests.Session()
     owned_session = session is None
     report = {"ok": False, "steps": [], "diagnosis": ""}
-    stage = "Health"
+    stage = "Models GET"
     started = time.monotonic()
     try:
-        for stage, method, url in [("Health", "get", origin + "/health"),
-                                   ("Model", "get", api + "/models"),
-                                   ("Chat", "post", api + "/chat/completions")]:
+        for stage, method, url in [("Models GET", "get", local_models_url(config)),
+                                   ("Chat POST", "post", local_chat_url(config))]:
             started = time.monotonic()
             kwargs = {"headers": headers, "timeout": (5, timeout)}
-            if stage == "Chat":
+            if stage == "Chat POST":
                 kwargs["json"] = {"model": loaded_id, "messages": [{"role": "user", "content": "Reply OK"}],
                                   "max_tokens": 8, "temperature": 0, "stream": False}
             response = getattr(http, method)(url, **kwargs)
             if not response.ok:
                 if response.status_code == 503:
                     diagnosis = "Server is loading; wait for startup and test again."
-                elif stage == "Health" and response.status_code == 404:
-                    diagnosis = "Port busy or wrong endpoint: this service does not expose /health."
+                elif response.status_code == 404:
+                    diagnosis = f"{stage} path was not found; check the configured local API route."
                 elif response.status_code in (401, 403):
                     diagnosis = "Server requires a valid local API key."
-                elif stage == "Chat" and any(word in response.text.lower() for word in ("context", "n_ctx")):
+                elif stage == "Chat POST" and any(word in response.text.lower() for word in ("context", "n_ctx")):
                     diagnosis = "Context too small for the test request."
                 else:
                     diagnosis = f"{stage} failed (HTTP {response.status_code}); check the endpoint and server log."
                 raise ValueError(diagnosis)
             body = response.json()
             detail = "Ready"
-            if stage == "Health" and body.get("status") not in (None, "ok", "ready"):
-                raise ValueError("Server is not ready; wait for startup and test again.")
-            if stage == "Model":
+            if stage == "Models GET":
                 catalog = body.get("data", [])
                 if not isinstance(catalog, list):
                     raise ValueError("Invalid model catalog from endpoint.")
@@ -182,7 +176,7 @@ def test_connection(profile=None, config=None, timeout=180, session=None):
                     from engine.local_models import remember_model_context
                     remember_model_context(config, loaded_id, context)
                 detail = os.path.basename(loaded_id)
-            if stage == "Chat":
+            if stage == "Chat POST":
                 choices = body.get("choices") or []
                 text = (choices[0].get("message", {}).get("content") or "") if choices else ""
                 if not text.strip():
@@ -217,7 +211,7 @@ def test_connection(profile=None, config=None, timeout=180, session=None):
     if not report["ok"]:
         report["steps"].append({"name": stage, "ok": False,
                                 "latency_ms": (time.monotonic() - started) * 1000, "detail": report["diagnosis"]})
-        for name in ("Health", "Model", "Chat"):
+        for name in ("Models GET", "Chat POST"):
             if not any(step["name"] == name for step in report["steps"]):
                 report["steps"].append({"name": name, "ok": None, "latency_ms": 0, "detail": "Skipped after failed check"})
     return report
