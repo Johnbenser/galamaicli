@@ -417,6 +417,34 @@ class LoopTests(Workspace):
         self.assertEqual(self.model_calls, 1)
         self.assertIn("exit status 0", messages[-1]["content"])
 
+    def test_simple_folder_listing_finishes_from_verified_output_without_ack_request(self):
+        (self.root / "alpha folder").mkdir()
+        (self.root / "beta").mkdir()
+        (self.root / "readme.txt").write_text("ordinary file")
+        command = f"ls -la {shlex.quote(str(self.root))}"
+        request = f"Go to my {self.root} then list my folders here"
+        messages, _ = self.run_loop([self.response("execute_bash", {"command": command})], request)
+        self.assertEqual(self.model_calls, 1)
+        self.assertIn("Folders in", messages[-1]["content"])
+        self.assertIn("alpha folder", messages[-1]["content"])
+        self.assertIn("beta", messages[-1]["content"])
+        self.assertNotIn("readme.txt", messages[-1]["content"])
+        self.assertEqual(AGENT_STATE['task_outcome'], 'completed')
+
+    def test_listing_receipt_does_not_finish_a_compound_mutation_request(self):
+        from engine.completion import completed_simple_request
+        result = ActionResult("drwxr-xr-x 2 user group 4096 Jan 1 12:00 site")
+        event = {"tool": "execute_bash", "args": {"command": "ls -la ."}, "result": result}
+        self.assertIsNone(completed_simple_request("List folders then delete the old one", [event], [], str(self.root)))
+
+    def test_listing_receipt_requires_the_command_to_list_the_requested_path(self):
+        from engine.completion import completed_simple_request
+        other = self.root / 'other'; other.mkdir()
+        command = f'ls -la {shlex.quote(str(other))}'
+        result = ActionResult("drwxr-xr-x 2 user group 4096 Jan 1 12:00 hidden-from-request")
+        event = {"tool": "execute_bash", "args": {"command": command}, "result": result}
+        self.assertIsNone(completed_simple_request(f"List folders in {self.root}", [event], [], str(self.root)))
+
     def test_file_receipt_waits_for_configured_checks(self):
         command = self.command("print('checked')")
         (self.root / ".galam-checks.json").write_text(json.dumps({"checks": {".txt": [command]}}))
