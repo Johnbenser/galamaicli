@@ -9,7 +9,7 @@ _ACTIVE = ContextVar('galam_command_agent', default=None)
 
 SYSTEM = ("You are Galam's Command Agent, using the user's selected model. Complete the current "
           "startup request without rechecking earlier finished tasks. Use observed entrypoints; inspect only unresolved prerequisites, retain the complete command and preserve "
-          "the project's build/start chain. For a long-running command use execute_bash(background=true), "
+          "the project's build/start chain. Prefer the manifest's declared development/serve workflow; do not replace a build-then-start chain with a start-only script. Do not install dependencies preemptively when project dependencies exist. Android shared-storage EACCES while creating npm symlinks is a filesystem limitation; never answer with recursive chmod. Use the existing project workflow or a private writable dependency location only for a proven missing dependency. A root HTTP 200 alone does not prove that the application or its requested navigation routes work; verify the actual served page/assets and relevant refresh routes. For a long-running command use execute_bash(background=true), "
           "with local readiness_url when observed. Preserve observed address settings; change them only for a user override or an observed startup conflict. If unknown, omit readiness_url and use the actual announced URL instead of inventing PORT overrides. Local code waits for build/readiness; do not poll with AI calls "
           "or launch another live copy. On a real error inspect the affected source, make a focused permitted "
           "repair, run relevant checks and continue. Preserve unrelated code, lockfiles, user constraints and "
@@ -160,10 +160,13 @@ class CommandAgent:
                 cause = next((line for line in lines if re.search(r'(?:SyntaxError|Error:|error\b|Cannot find|not found|ENOENT|ModuleNotFound)',line)), '')
                 if cause.startswith('Error: Process exited'):
                     cause = '\n'.join(lines[-8:])
-                self.pending_feedback = ('[Command Agent diagnosis] Startup/check failed. Use the actual error below, '
-                    'inspect only the implicated source or missing prerequisite, repair within the requested scope, '
-                    'and verify before retrying. Preserve the original entry command and existing review decisions. '
-                    'If the process is still alive, inspect/recheck it instead of launching another copy.\n' + (cause or text[-800:]))
+                if re.search(r'(?i)(?:EACCES|permission denied).*symlink|symlink.*(?:EACCES|permission denied)', text) and re.search(r'(?i)(?:/sdcard|/storage/emulated/0)', text):
+                    self.pending_feedback = ('[Command Agent diagnosis] npm cannot create symlinks in Android shared storage. This is a filesystem limitation, not a reason to change project permissions. Do not repeat package installation or run recursive chmod. The failed install did not test the declared build/start workflow: if project dependencies are already present, run the observed development/build chain. If the actual build identifies one missing dependency, place dependencies in a private writable location and keep project source in place. Preserve the observed build/start chain and verify the served application and relevant routes.\n' + (cause or text[-800:]))
+                else:
+                    self.pending_feedback = ('[Command Agent diagnosis] Startup/check failed. Use the actual error below, '
+                        'inspect only the implicated source or missing prerequisite, repair within the requested scope, '
+                        'and verify before retrying. Preserve the original entry command and existing review decisions. '
+                        'If the process is still alive, inspect/recheck it instead of launching another copy.\n' + (cause or text[-800:]))
                 progress = True
             else:
                 self.pending_feedback = ('[Command Agent diagnosis] The same startup failure persists; '

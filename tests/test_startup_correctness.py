@@ -195,3 +195,33 @@ class StartupCorrectnessTests(fixtures.Workspace):
         from engine.startup_discovery import discover
         data=discover('Run my server',str(self.root))
         self.assertIn(tempfile.gettempdir(),data['content'])
+
+    def test_manifest_prefers_declared_build_then_server_workflow(self):
+        from engine.startup_discovery import discover
+        project=self.root/'portfolio'; project.mkdir()
+        (project/'node_modules').mkdir()
+        (project/'package.json').write_text(json.dumps({'scripts':{
+            'build':'node build-react.js','dev':'npm run build && npm start',
+            'start':'PORT=5501 python3 -u server.py','preview':'npm start'}}))
+        result=discover(f'run my server in {project}',str(self.root))
+        self.assertIn('Recommended project launch: npm run dev',result['content'])
+        self.assertIn('do not replace it with a start-only script',result['content'])
+        self.assertIn('node_modules already exists. Do not run a package install preemptively',result['content'])
+        self.assertIn('do not run recursive chmod',result['content'])
+
+    def test_missing_leading_slash_project_name_resolves_only_exact_workspace_sibling(self):
+        from engine.startup_discovery import discover
+        work=self.root/'workspace'; work.mkdir()
+        (work/'galamaicli').mkdir(); (work/'jbnsrr-poetfolio-react').mkdir()
+        data=discover('run my server in /jbnsrr-poetfolio-react',str(work/'galamaicli'))
+        self.assertEqual(data['directory'],str(work/'jbnsrr-poetfolio-react'))
+        self.assertIn('resolved its exact project-directory name beside the current workspace',data['content'])
+        unresolved=discover('run my server in /unknown-project',str(work/'galamaicli'))
+        self.assertIsNone(unresolved['directory'])
+
+    def test_recursive_permission_changes_are_rejected_as_generic_shell_repair(self):
+        for command in ('chmod -R 755 /sdcard/project', 'chmod --recursive u+rwX /work/project'):
+            valid,reason=validate_shell_command(command)
+            self.assertFalse(valid,command)
+            self.assertIn('recursive permission changes',reason)
+        self.assertTrue(validate_shell_command('chmod 644 one-specific-file.txt')[0])

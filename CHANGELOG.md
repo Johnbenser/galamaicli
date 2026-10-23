@@ -4,6 +4,13 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Android project startup and refresh reliability
+
+- Resolve a missing leading-slash project name only when it matches one exact sibling of the current workspace; ambiguous or unmatched names remain blocked before launch.
+- Prefer the package manifest's declared development workflow, including a build step it composes. Avoid preemptive dependency installation when local dependencies already exist; diagnose Android shared-storage symlink `EACCES` separately and reject recursive `chmod` commands as a generic repair.
+- Require startup guidance to check the served application and relevant refresh/navigation routes instead of treating the root page's HTTP 200 as proof that the site works. A read-only live check returned HTML for the project's home page and all ten declared clean routes; its served entrypoint assets matched the project files. The server was not restarted or modified.
+- Added four regressions. **All 429 tests passed** in one full run without skips (80.401 seconds). See [startup workflow follow-up](artifacts/STARTUP_WORKFLOW_FOLLOWUP.md).
+
 ### Startup correctness and existing services
 
 - Investigated `1a32524e`: a healthy external server could not satisfy startup because completion required a new owned launch. Match actual served project HTML and referenced local assets, report external readiness honestly, and preserve ownership boundaries. Exact commands, builds/restarts and additional checks retain their execution requirements.

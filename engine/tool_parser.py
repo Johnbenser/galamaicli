@@ -56,6 +56,8 @@ def validate_shell_command(command: str) -> Tuple[bool, str]:
     from engine.server_commands import _without_heredocs
     shell = _without_heredocs(command)
     visible = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', ' DATA ', shell)
+    if re.search(r'(?i)(?:^|[;&|]\s*)chmod\s+(?:-[A-Za-z]*R[A-Za-z]*|--recursive)\s+(?:0?[0-7]{3,4}|[ugoa]*[+=-][rwxXstugo]+)\s+', visible):
+        return False, "recursive permission changes are not a safe generic repair; diagnose the exact file or directory error and change only that path if the user requested it"
     quoted_path = re.search(r'''\bcd\s+(?:--\s+)?(['"])(<[^>]+>|your_project_name|project_name_here)\1''', shell, re.I)
     if quoted_path or re.search(r'(?i)(?:your_project_name|project_name_here|replace_this|<[A-Za-z_][^>;&|\n]*>|\bTODO\b)', visible):
         return False, "the command contains a placeholder rather than a real project path"

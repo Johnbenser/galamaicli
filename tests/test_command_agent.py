@@ -277,6 +277,17 @@ class CommandAgentTests(fixtures.Workspace):
             agent.observe('execute_bash',args,ActionResult('Error: PID 456 failed',False,1))
             self.assertFalse(workflow.new_in_round)
 
+    def test_android_npm_symlink_error_does_not_suggest_recursive_permission_fix(self):
+        text=("npm error path ../esbuild/bin/esbuild\nnpm error dest "
+              "/storage/emulated/0/project/node_modules/.bin/esbuild\n"
+              "npm error EACCES: permission denied, symlink")
+        with CommandAgent([{'role':'user','content':'Run my server'}],'android-symlink',CONFIG) as agent:
+            agent.observe('execute_bash',{'command':'npm install'},ActionResult(text,False,1))
+            self.assertIn('Android shared storage',agent.pending_feedback)
+            self.assertIn('Do not repeat package installation',agent.pending_feedback)
+            self.assertIn('run recursive chmod',agent.pending_feedback)
+            self.assertIn('failed install did not test the declared build/start workflow',agent.pending_feedback)
+
     def test_routing_handles_plain_commands_without_executing_questions_or_negations(self):
         for request in ('Run npm run dev', 'Please execute python -m http.server 8000',
                         'Start the project server', 'Run `pnpm dev`'):
