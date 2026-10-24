@@ -1,11 +1,11 @@
-import sys
 from prompt_toolkit.application import Application
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import Window, HSplit
+from prompt_toolkit.key_binding import KeyBindings,ConditionalKeyBindings,DynamicKeyBindings,merge_key_bindings
+from prompt_toolkit.layout.containers import Window, HSplit,DynamicContainer
+from prompt_toolkit.application.current import get_app
+from prompt_toolkit.utils import get_cwidth
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.styles import Style
-from prompt_toolkit.filters import to_filter
+from prompt_toolkit.filters import Condition
 from config import CONFIG, save_settings
 from engine.execution_policy import next_mode
 from storage.endpoints import ENDPOINT_REGISTRY
@@ -21,11 +21,12 @@ class InlineSettingsApp:
         from engine.local_ui import LocalScreens
         self.local_screens = LocalScreens(CONFIG, save_settings)
         self.cursor_idx = 0
+        self.status = 'Choose a section to configure your workspace.'
         self.kb = KeyBindings()
         self._setup_bindings()
 
     def _get_items(self):
-        active_ep = self.selected_ep
+        active_ep = CONFIG.get("active_endpoint") or CONFIG.get("endpoint", self.selected_ep)
         active_m = CONFIG.get("active_model") or CONFIG.get("model", "")
         clean_m = active_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
         mode = CONFIG.get("mode", "REVIEW").upper().replace("_", "-")
@@ -43,27 +44,26 @@ class InlineSettingsApp:
             ]
             if CONFIG.get("local_manager", True) is not False:
                 items.insert(-1, self.local_screens.main_item())
+            items.insert(-1, {"label":"Model Connections", "hint":"[Add / Edit]", "action":"to_connections"})
             return items
         elif self.screen == "endpoints":
-            eps = list(ENDPOINT_REGISTRY.keys())
+            eps = sorted(ENDPOINT_REGISTRY,key=str.casefold)
             return [
-                {"label": ep, "hint": "(active)" if ep == self.selected_ep else "", "id": ep}
+                {"label": ep, "hint": "(active)" if ep == active_ep else "", "id": ep}
                 for ep in eps
             ]
         elif self.screen == "models":
             ep = self.selected_ep
-            if ep not in ENDPOINT_REGISTRY:
-                ep = list(ENDPOINT_REGISTRY.keys())[0]
-            models = list(ENDPOINT_REGISTRY[ep]["models"].keys())
+            models = list(ENDPOINT_REGISTRY.get(ep,{}).get("models",{}))
             return [
                 {
                     "label": m.split("/")[-1].replace("@cf/", "").replace("meta/", ""),
-                    "hint": "(active)" if m == active_m else "",
+                    "hint": "(active)" if m == active_m and self.selected_ep == active_ep else "",
                     "id": m
                 }
                 for m in models
             ]
-        elif self.screen in ("local", "local_add", "local_result"):
+        elif self.screen in ("local", "local_profiles", "local_tuning", "local_add", "local_result"):
             return self.local_screens.items(self.screen)
         return []
 
@@ -94,10 +94,12 @@ class InlineSettingsApp:
             if self.screen == "main":
                 act = item.get("action")
                 if act == "to_endpoints":
+                    self.selected_ep=CONFIG.get("active_endpoint",self.selected_ep)
                     self.screen = "endpoints"
-                    eps = list(ENDPOINT_REGISTRY.keys())
+                    eps = sorted(ENDPOINT_REGISTRY,key=str.casefold)
                     self.cursor_idx = eps.index(self.selected_ep) if self.selected_ep in eps else 0
                 elif act == "to_models":
+                    self.selected_ep=CONFIG.get("active_endpoint",self.selected_ep)
                     self.screen = "models"
                     if self.selected_ep == "Local Endpoint":
                         from engine.local_models import refresh_local_models
@@ -121,6 +123,8 @@ class InlineSettingsApp:
                 elif act == "to_local":
                     self.screen = "local"
                     self.cursor_idx = 0
+                elif act == "to_connections":
+                    self.open_connections(event.app)
                 elif act == "exit":
                     event.app.exit()
 
@@ -145,9 +149,7 @@ class InlineSettingsApp:
                 CONFIG["active_model"] = new_m
                 CONFIG["model"] = new_m
 
-                clean_m = new_m.split("/")[-1].replace("@cf/", "").replace("meta/", "")
-                sys.stdout.write(f"\n\033[38;5;39m•\033[0m \033[1;38;5;75mEngine Updated:\033[0m \033[1;38;5;141m[{self.selected_ep}]\033[0m \033[1;38;5;120m{clean_m}\033[0m\n")
-                sys.stdout.flush()
+                self.status = 'Selected: '+self.selected_ep+' / '+new_m
 
                 if self.initial_screen == "models":
                     event.app.exit()
@@ -155,13 +157,15 @@ class InlineSettingsApp:
                     self.screen = "main"
                     self.cursor_idx = 1
 
-            elif self.screen in ("local", "local_add", "local_result"):
+            elif self.screen in ("local", "local_profiles", "local_tuning", "local_add", "local_result"):
                 destination = self.local_screens.enter(item, event.app.invalidate)
                 if item.get("action") in ("local_activate", "local_add_profile"):
                     self.selected_ep = CONFIG.get("active_endpoint", self.selected_ep)
                 if destination:
                     self.screen = destination
                     self.cursor_idx = 0
+                    if destination == "local_server_editor":
+                        self.open_local_server_editor(event.app)
 
             event.app.invalidate()
 
@@ -170,7 +174,11 @@ class InlineSettingsApp:
         @self.kb.add('c-c')
         def _back(event):
             if self.screen in ("local_add", "local_result"):
-                self.local_screens.enter({"action": "local_back"}, event.app.invalidate)
+                destination = self.local_screens.enter({"action": "local_back"}, event.app.invalidate)
+                self.screen = destination or "local"
+                self.cursor_idx = 0
+                event.app.invalidate()
+            elif self.screen in ("local_profiles", "local_tuning"):
                 self.screen = "local"
                 self.cursor_idx = 0
                 event.app.invalidate()
@@ -181,69 +189,91 @@ class InlineSettingsApp:
             else:
                 event.app.exit()
 
+    def page_title(self):
+        return {'main':'Workspace settings','endpoints':'Choose endpoint','models':'Choose model',
+                'local':'Local models','local_profiles':'Local model profiles','local_tuning':'Local model tuning',
+                'local_add':'Select GGUF','local_result':'Local model status'}.get(self.screen,'Settings')
+
     def get_formatted_text(self):
-        items = self._get_items()
-        if self.screen == "main":
-            title = "Galam.AI Settings"
-        elif self.screen == "endpoints":
-            title = "Select Endpoint"
-        elif self.screen in ("local", "local_add", "local_result"):
-            title = {"local": "Local Models", "local_add": "Select GGUF", "local_result": "Local Model Status"}[self.screen]
-        else:
-            title = f"Select Model [{self.selected_ep}]"
-
-        lines = [("class:title", f"╭── {title}\n")]
-        start_idx = max(0, min(self.cursor_idx - 3, len(items) - 7))
-        visible_items = items[start_idx:start_idx + 7]
-
-        for i, itm in enumerate(visible_items):
-            actual_idx = start_idx + i
-            label = itm.get("label", "")
-            hint = itm.get("hint", "")
-            if actual_idx == self.cursor_idx:
-                lines.append(("class:cursor", "│ ▶ "))
-                lines.append(("class:selected", f"{label:<24}"))
-                if hint:
-                    lines.append(("class:selected_hint", f" {hint}"))
-                lines.append(("", "\n"))
-            else:
-                lines.append(("class:border", "│   "))
-                lines.append(("class:unselected", f"{label:<24}"))
-                if hint:
-                    lines.append(("class:hint", f" {hint}"))
-                lines.append(("", "\n"))
-
-        for _ in range(7 - len(visible_items)):
-            lines.append(("class:border", "│\n"))
-
-        lines.append(("class:border", "╰──────────────────────────────────────────\n"))
-        lines.append(("class:help", "  [↑/↓] Navigate  •  [Enter] Select  •  [Esc] Back\n"))
+        """Original compact ten-line menu, with cell-safe rows on narrow terminals."""
+        items=self._get_items()
+        width=max(12,get_app().output.get_size().columns-1)
+        def crop(text,limit):
+            result=''
+            for char in text:
+                if get_cwidth(result+char)>limit-1:return result+'…'
+                result+=char
+            return result
+        title={'main':'Galam.AI Settings','endpoints':'Select Endpoint','models':'Select Model ['+self.selected_ep+']',
+               'local':'Local Models','local_profiles':'Model Profiles','local_tuning':'Local Tuning',
+               'local_add':'Select GGUF','local_result':'Local Model Status'}.get(self.screen,'Settings')
+        lines=[('class:title',crop('╭── '+title,width)+'\n')]
+        start=max(0,min(self.cursor_idx-3,len(items)-7))
+        for index,item in enumerate(items[start:start+7],start):
+            selected=index==self.cursor_idx
+            label=item.get('label','');hint=item.get('hint','')
+            available=width-4
+            # Keep the old aligned label/value layout when it fits.
+            label_width=min(24,max(len(label),available-len(hint)-1))
+            text=label.ljust(label_width)+((' '+hint) if hint else '')
+            lines.append(('class:cursor' if selected else 'class:border','│ ▶ ' if selected else '│   '))
+            shown=crop(text,available)
+            split=min(len(shown),len(label.ljust(label_width)))
+            lines.append(('class:selected' if selected else 'class:unselected',shown[:split]))
+            if shown[split:]:lines.append(('class:selected_hint' if selected else 'class:hint',shown[split:]))
+            lines.append(('', '\n'))
+        for _ in range(max(0,7-len(items[start:start+7]))):lines.append(('class:border','│\n'))
+        lines.append(('class:border','╰'+'─'*min(42,width-1)+'\n'))
+        lines.append(('class:help',crop('  ↑/↓ Navigate · Enter Select · Esc Back',width)))
         return lines
 
+    def close_connections(self):
+        self.selected_ep=CONFIG.get('active_endpoint',self.selected_ep)
+        self.screen='main'
+        self.cursor_idx=next((index for index,item in enumerate(self._get_items()) if item.get('action')=='to_connections'),0)
+        self.status='Connection editor closed. Saved changes are applied.'
+        self.app.layout.focus(self.menu_window);self.app.invalidate()
+
+    def open_connections(self,app):
+        from ui.endpoint_manager import EndpointManager
+        self.editor=EndpointManager(on_close=self.close_connections)
+        self.editor.app=app
+        self.screen='connections'
+        app.layout.focus(self.editor.endpoint_button if self.editor.page=='form' else self.editor.body)
+        app.invalidate()
+
+    def close_local_server_editor(self):
+        self.screen='local'
+        self.cursor_idx=0
+        self.app.layout.focus(self.menu_window)
+        self.app.invalidate()
+
+    def open_local_server_editor(self,app):
+        from ui.local_server_editor import LocalServerEditor
+        self.editor=LocalServerEditor(CONFIG,save_settings,self.close_local_server_editor)
+        self.editor.app=app
+        app.layout.focus(self.editor.fields['url'])
+        app.invalidate()
+
+    def build_application(self):
+        from ui.settings_theme import SETTINGS_STYLE
+        self.menu_window=Window(FormattedTextControl(self.get_formatted_text),height=10,wrap_lines=False)
+        root=HSplit([self.menu_window])
+        keys=merge_key_bindings([
+            ConditionalKeyBindings(self.kb,Condition(lambda:self.screen not in ('connections','local_server_editor'))),
+            ConditionalKeyBindings(DynamicKeyBindings(lambda:self.editor.key_bindings if hasattr(self,'editor') else None),
+                                   Condition(lambda:self.screen in ('connections','local_server_editor')))])
+        app=Application(layout=Layout(DynamicContainer(lambda:self.editor.root if self.screen in ('connections','local_server_editor') else root)),
+                        key_bindings=keys,style=SETTINGS_STYLE,full_screen=False,erase_when_done=True,mouse_support=False)
+        app.ttimeoutlen=.1
+        self.app=app
+        return app
+
     def run(self):
-        style = Style.from_dict({
-            'title': 'fg:#38bdf8 bold',
-            'border': 'fg:#3f3f46',
-            'cursor': 'fg:#38bdf8 bold',
-            'selected': 'fg:#ffffff bg:#1e293b bold',
-            'selected_hint': 'fg:#38bdf8 bg:#1e293b bold',
-            'unselected': 'fg:#94a3b8',
-            'hint': 'fg:#64748b',
-            'help': 'fg:#52525b',
-        })
-        app = Application(
-            layout=Layout(HSplit([Window(
-                content=FormattedTextControl(self.get_formatted_text),
-                height=10,
-                dont_extend_height=to_filter(True)
-            )])),
-            key_bindings=self.kb,
-            style=style,
-            full_screen=False
-        )
-        app.run()
-        sys.stdout.write("\033[10A\r\033[J")
-        sys.stdout.flush()
+        app=self.build_application()
+        try:app.run()
+        finally:
+            if hasattr(self,'editor'):self.editor.clear_key()
 
 def handle_settings_menu():
     InlineSettingsApp(initial_screen="main").run()

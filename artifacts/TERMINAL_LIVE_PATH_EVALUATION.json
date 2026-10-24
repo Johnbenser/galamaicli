@@ -1,0 +1,10 @@
+{
+  "sample_navigation_correct": true,
+  "followup_listing_success": true,
+  "model_requests": 0,
+  "executed_operations": [
+    "cd",
+    "ls"
+  ],
+  "project_mutating_commands": 0
+}

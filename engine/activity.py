@@ -41,6 +41,8 @@ def reasoning_activity(text):
 
 def phase_activity(message):
     text = str(message)
+    if 'clarification' in text.lower() or 'ask_user' in text:
+        return 'Asking', clean(concise(text))
     if 'approval' in text.lower():
         return 'Reviewing',clean(concise(text))
     if 'structured action' in text.lower():

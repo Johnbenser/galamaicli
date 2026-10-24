@@ -34,12 +34,15 @@ Galam is its own assistant, with its own terminal interface, settings, action wo
 |---|---|
 | **Real terminal actions** | Structured tool calls reach the execution layer; results carry success/failure status and exit codes. |
 | **Visible code changes** | Edits display line numbers, red deletions, and green additions. Existing files are inspected before focused modifications. |
+| **Custom connections** | Add models and API routes in settings; keys stay in home-owned `~/.secrets`. |
 | **Model flexibility** | Provider adapters handle their request formats. Compatible models can use native tools; text tool calls remain available as a fallback. |
 | **Budgeted context** | A local context engine reserves response space and selects relevant conversation and tool evidence. No extra summarizer model is required. |
 | **Conversation isolation** | A chat uses its own history. `/btw` has separate side-chat history and cancellation. |
+| **Conditional recall** | Follow-ups retrieve relevant earlier findings from this conversation, with original references. Retrieval needs no extra model or embeddings. |
 | **Readable progress** | One-word activity labels and a concise status accompany a continuously animated active task. Ctrl+O opens the supplied reasoning and execution trace. |
 | **Resumable work** | A full-screen conversation picker restores saved context and the working directory when available. |
-| **Honest completion** | Each task gets measured duration, a fixed completion time, and input/output token totals, with estimates labeled. |
+| **Honest completion** | Each task gets measured duration, a fixed AM/PM completion time, and one combined token total, with estimates marked `~`. |
+| **Command Agent** | A focused startup worker uses your selected model, waits locally for builds/readiness, and reports below the input. Verified services remain marked running. |
 | **Local GGUF workflow** | Discover model files, save profiles, test connections, tune presets, and manage servers started by Galam. |
 
 > Model quality, speed, tool support, and usage reporting depend on the selected model and provider. Galam's workflow is designed to help smaller models stay grounded in real tool results; this repository does not claim a universal performance benchmark.
@@ -110,6 +113,29 @@ Restart Galam after updating. Commit or set aside your own source changes before
 
 ## Connect a model
 
+### Add a model or custom endpoint in settings
+
+Settings keeps the original compact inline menu and terminal colors. The four-step connection flow opens in the same inline application, with no alternate-screen switch. Execution, fallback, streaming and local-model controls remain available.
+
+Open **`/settings` → Model Connections**. A four-step wizard opens inside the same settings application:
+
+1. **Model:** choose an endpoint group from the sorted numbered picker, then enter the exact model ID. Arrows update the selected value immediately; you can also type a number and press Enter. Use **Saved models** to edit a custom connection.
+2. **Request:** enter the **complete request URL**. **Default sends this exact URL unchanged**. It detects the payload format from familiar routes, including `/api/chat` (native Ollama), `/chat/completions`, and `/responses`; unknown paths use the model/group catalog preference. Explicit Chat Completions, Responses and Ollama Chat choices change the request body, never the URL. Use the provider's documented route: Responses is normally plural `/v1/responses`, but Galam will not silently correct a typed URL.
+3. **Credentials:** enter a variable name or leave it automatic, enter a masked key if needed, set the context window, and choose whether to activate the model. Blank keys keep the referenced credential. Both `NAME` and `$NAME` are accepted; names must end in `_API_KEY` or `_API_TOKEN`.
+4. **Review:** check the endpoint group, model, exact URL, payload format and credential reference before saving. The credential value is never displayed.
+
+A provider choice offers a full request URL only when the URL field is empty or still contains an untouched suggestion. A manually entered URL stays in place when moving the model to another group. Changing an automatic suggestion to a different host clears the previous credential inputs.
+
+**Tab / Shift+Tab** moves between controls; **Ctrl+S** advances to the next step and saves only from Review. **Esc** goes back a step; at the first step it returns to settings. **Cancel** discards the form. Save feedback stays inside the editor. Connection changes are blocked during active main/side tasks.
+
+Native Ollama chat supports JSON and NDJSON streaming, including JSON streams mislabeled by a server or proxy, structured Bash/file actions, native tool results, thinking text supplied by the provider, and its reported prompt/evaluation token counts. Existing Chat Completions and Responses connections retain Galam's common action pipeline.
+
+Custom definitions live in **`~/.galam/endpoints.json`** and contain only routing metadata and credential variable names. Keys entered here go only into **`~/.secrets`**, written privately with mode `600`. Existing exports and comments are preserved; updating a variable avoids duplicate assignments. The selected home follows an existing Termux `~/.secrets` when Galam runs through an alternate home, and `GALAM_HOME` can explicitly select a home directory.
+
+Saving applies the credential in Galam immediately, so its next request needs no restart or manual source command. A guarded source line is added once to the selected home's `.bashrc` or `.zshrc` for future shells. An already-open parent terminal has its own environment; run `source ~/.secrets` there if you also need the updated variable outside Galam. Galam reads literal assignments itself and does not execute the rest of your secret file.
+
+New connections are assigned through the endpoint list and can join built-in endpoint groups without replacing their existing model routes. Editing built-in model definitions through this editor is rejected; load a saved custom profile to edit that profile. Models referring to the same credential variable share its key. These connections support OpenAI-compatible Chat Completions and Responses, including text, streaming, function calls and tool results; other API families such as embeddings or Anthropic Messages require their own adapters.
+
 ### Remote providers
 
 Set the credential for the endpoint you want to use, then launch Galam and open `/settings` to select the endpoint and model. `/model` selects a model under the active endpoint.
@@ -154,7 +180,7 @@ export LOCAL_ENDPOINT_URL="http://127.0.0.1:8080/v1"
 python galam.py
 ```
 
-The default is `http://127.0.0.1:8080/v1`. A saved endpoint address takes precedence over the environment fallback. Galam discovers the running server's model IDs; model weights and a server binary are not bundled. For a server on another machine, use that machine's reachable address rather than `localhost`.
+The default is `http://127.0.0.1:8080/v1`. In `/settings` → **Local Models** → **Server Connection**, set the server URL (including its port) and the routes Galam should call. Defaults are `GET /v1/models` and `POST /v1/chat/completions`; both paths can be customized for another OpenAI-compatible server. **Test connection** checks those configured routes and sends a small chat request. Saved settings take precedence over `LOCAL_ENDPOINT_URL`. Galam connects to a running server; model weights and a server binary are not bundled. For a server on another machine, use its reachable address rather than `localhost`.
 
 ### GGUF profiles and owned servers
 
@@ -162,7 +188,7 @@ Open `/settings` → **Local Models** → **+ Add model** to scan home directori
 
 | Command | Purpose |
 |---|---|
-| `/local test` | Background health, model-match, and tiny-chat checks; displays latency and approximate throughput. |
+| `/local test` | Background model-list and tiny-chat checks; displays latency and approximate throughput. |
 | `/local command` | Show the selected profile's llama-server command. |
 | `/local start` | Start a selected profile on a free loopback port. |
 | `/local restart` | Restart only a server Galam started and can still identify. |
@@ -204,7 +230,7 @@ flowchart TD
 
 Arrows show logical communication; intermediate functions and optional branches are simplified. Tool results return to the same task for correction, verification, or completion. Fully specified simple filesystem tasks can finish from verified local receipts without a redundant model acknowledgment request.
 
-### Context is a budget, not an unlimited transcript
+### Context selection and recoverable evidence
 
 ```mermaid
 flowchart LR
@@ -231,7 +257,10 @@ galamaicli/
 ├── galamai                      # Portable command launcher
 ├── config.py                    # Local settings and credential loading
 ├── engine/
+│   ├── api_protocols.py         # Responses input, events and tool exchange
 │   ├── context_manager.py       # Context budget and message selection
+│   ├── conversation_recall.py   # Conditional evidence retrieval within one chat
+│   ├── startup_discovery.py     # Read-only project startup metadata
 │   ├── context_compaction.py    # Recoverable overflow handling
 │   ├── prompt_context.py        # Compact identity and observations
 │   ├── repo_context.py          # Relevant source-symbol outlines
@@ -254,12 +283,14 @@ galamaicli/
 ├── routers/manager.py           # Provider transports and response handling
 ├── storage/
 │   ├── endpoints.py             # Provider/model catalog
+│   ├── user_endpoints.py        # Home-owned profiles and private key updates
 │   ├── conversations.py         # Conversation ownership and persistence
 │   └── keys.example.json        # Empty credential template
 ├── ui/
 │   ├── dock_layout.py           # Live terminal input and trace panel
 │   ├── response_renderer.py     # Tables, headings, lists and code
 │   ├── settings_menu.py         # Endpoint/model/settings screens
+│   ├── endpoint_manager.py      # Custom connection editor and masked key entry
 │   └── conversation_picker.py   # Full-screen resume UI
 ├── tools/                       # Filesystem tools and development audits
 ├── tests/                       # Behavioral regression tests
@@ -279,9 +310,63 @@ An action is more than text that looks like a command. Galam parses a complete t
 |---|---|
 | `review` | Tool actions require review. |
 | `auto` | Recognized safe reads can proceed; other actions require review. |
-| `always-proceed` | Actions proceed without an interactive review prompt. |
+| `always-proceed` | Ordinary actions proceed; recognized critical actions still require review. |
 
 Switch with `/mode review`, `/mode auto`, or `/mode always-proceed`. These are execution policies, not an OS sandbox. Actions run with the permissions of the current terminal process.
+
+### Command references and clarification
+
+Before Bash execution, Galam retrieves relevant facts from the current filesystem and project manifest. It checks known directory, package-script, Python and Node entrypoint proposals, rejecting concrete contradictions with the available project commands. It rechecks changed metadata. Complex shell programs and custom commands remain subject to review and runtime verification; finding a script is not proof that it will succeed. These checks require no additional model call or conversation search.
+
+The `ask_user` Galam Action presents a question above the existing input dock. Reply in `answer>` or select a numbered suggestion. Essential missing context waits for your answer, while safe local discovery can check an explicitly named file or folder. One exact verified match withdraws the unanswered question; ambiguous matches keep waiting. An unnamed folder is never selected merely because it is the only folder nearby. A supplied answer does not approve a later action. Late replies stay as editable drafts instead of becoming queued commands; Esc twice cancels the current task.
+
+Simple navigation and listing requests use verified paths directly. If no target or explicit current directory is available, Galam asks which folder to use. The command worker keeps normal review rules and reports actual output.
+
+Directory listings follow a symlink to its actual root and preserve a request for subfolders. Server startup locates an exact named nearby project before reading its metadata. For local navigation/page failures, Galam gathers current HTTP route and asset evidence before source diagnosis; HTTP 200 alone does not establish working browser clicks. Incomplete action markup is repaired before execution and cannot be counted as a completed task. Content searches prioritize authored source and exclude incidental assistant transcript contents.
+
+Developers can run the offline Propose–Probe–Compose fixture check with `python tools/evaluate_terminal_workflow.py --output /path/to/report.json`. It evaluates command proposals and real disposable read commands without API calls or user-project edits. See [terminal workflow evidence](artifacts/TERMINAL_ACTION_WORKFLOW.md) for coverage and limits.
+
+### Continuing difficult tasks
+
+`max_iterations` sets checkpoint frequency, never a total step limit. There is **no default task cap on steps, requests, cumulative tokens or duration**. Repeated work receives guidance to change approach using retained evidence; retry counters no longer terminate the task. Unchanged exact file reads reuse their observed results. A known launch recipe stays intact instead of being rediscovered through repeated listings.
+
+Usage remains cumulative and visible. Optional user-selected spending caps are still enforced; provider quotas, real context/output capacities, individual operation deadlines, cancellation and execution reviews still apply. Continuing automatically can consume more usage; Galam does not guarantee a fixed cost or completion by every model.
+
+Use `/budget` to inspect optional caps. Set one with `/budget tokens 240000`, `/budget requests 256`, or `/budget seconds 3600`; disable it with `/budget tokens off` (likewise requests/seconds). Saved spend survives continuation. A one-time migration removes caps and global context overrides generated by older versions; explicitly marked user caps remain. Checkpoint creation, duplicate detection and `/budget` make no AI requests.
+
+### Context and conversation recall
+
+Galam budgets each request against the selected connection's context metadata, with local-server advertised limits when available and an explicit output reservation. It no longer applies a separate 6,000-token optional-history ceiling. Old transcript evidence stays on disk and is retrieved as needed; this does **not** make the provider's request window infinite.
+
+References such as “search it,” “based on your research,” and “what command did you run earlier?” can retrieve relevant earlier evidence from the same conversation. Original tool results are distinguished from proposed calls. Stored commands are recalled as executed only with a matching execution observation. Retrieved text is historical data, not permission or proof that files/processes are still current. Unrelated topics do not automatically receive a memory packet, and `/btw` remains independent.
+
+Context packing coalesces generated recovery messages, preserves user/workspace rules, archives complete native call/result groups and retains exact command/path arguments. Generated worker instructions can yield space to the common action contract. The complete provider-converted request is checked before sending; JSON escaping, tool schemas and output reservation count. Exact tool evidence no longer expires automatically by age or action count. Query failures save a readable outcome with the last observed result.
+
+### Running project services
+
+Common launch commands and explicit `execute_bash(background=true)` calls share one process runner. Custom scripts and Make targets do not need a filename/framework whitelist. An optional local `readiness_url` supports HTTP(S) or TCP probes; otherwise the runner uses an evidenced port or a local URL announced in the process log. Unknown readiness stays unknown. It never adopts an unrelated healthy service as proof that this project started.
+
+Processes are tracked immediately after spawn. A readiness timeout retains the live process and its private log, and retrying the same command/directory rechecks it rather than starting another copy. Startup polling is local and cancellable. `server_startup_timeout` defaults to 30 seconds (bounded at 120); an authentication response is distinguished from a successful health check. No model call is needed to poll readiness. Complete startup facts and small targeted recent answers survive compaction.
+
+Startup requests now enter a **Command Agent** using the same selected endpoint/model. The main action loop waits for this scoped worker; it does not launch competing commands. The worker keeps the current task, prior user constraints and Galam's existing review/edit rules. Its row below the input shows stages such as Reading, Building, Diagnosing, Repairing and Verifying. After a responding service is verified, that row becomes a persistent running service pill. An unknown health state displays **unverified** instead.
+
+Requests like “run my web on localhost /path/to/project” enter this workflow without needing the word “server.” Read-only discovery resolves the explicit project and provides actual package scripts, package-manager metadata and entrypoint candidates. The model chooses the command; React projects may use Vite, a custom Node build, Python serving or another setup. A later authorized background command can enter the worker through the same executor. Discovery never launches by itself or grants edit inspection/approval.
+
+For compound requests such as “start the app, then run checks,” startup readiness leaves the requested follow-up work active. The verified service remains visible below the input while that work continues.
+
+Build/start chains run intact. Recognized build output gets a local build allowance (`server_build_timeout`, default 180 seconds, maximum 1,800), followed by the startup allowance. Repeated phase changes cannot extend the absolute deadline. On startup failure, the worker receives compact error evidence and can inspect, repair and check the implicated source. Successful readiness produces a local receipt without an extra AI acknowledgment request. Worker requests share the parent's cumulative allowances and total-token footer; local waiting uses no model requests. Set `command_agent` to `false` in settings to restore the original action loop. See [Command Agent implementation](artifacts/COMMAND_AGENT.md) for scope and verification limits.
+
+### Security and user identity
+
+John Benser is credited as the creator. Installing Galam does **not** identify the installer as John or grant creator privileges. Each current user operates with their own terminal permissions, settings, credentials and selected conversation.
+
+- `/audit [directory]` runs bounded, read-only local checks for credential files, tracked credential paths, recognizable embedded tokens, insecure TLS code and remote script execution. Findings contain paths/categories, not matched values. It makes no AI calls and changes no files. The model can request the same audit when relevant.
+- Model file tools protect common credential paths, including symlink targets. Project searches exclude common secret files. Configure keys through settings or edit them locally.
+- Shell commands do not inherit recognized API keys/tokens/passwords by default. Recognized credential access requires review; after approval, that command can use credentials. Known environment secret values and recognizable token/private-key formats are redacted from tool observations and new diagnostic records.
+- Recognized destructive/privileged shell commands and structured writes outside the current workspace or into Git metadata require review in every mode. Automatic server cleanup stops only processes tracked as launched by this Galam instance.
+- Provider fallback and HTTP helper transports retain TLS certificate verification. Repair the system CA configuration when a certificate check fails; do not disable verification.
+
+These are heuristic safeguards, **not a security sandbox or a complete vulnerability scan**. Approved shell commands and project programs can access files with the terminal user's permissions. Use an isolated OS account/container for untrusted projects. The audit excludes dependency vulnerability feeds, running services and complete Git history. Previously saved logs/history are not retroactively scrubbed; do not publish them.
 
 ### File editing and verification
 
@@ -322,9 +407,7 @@ Responses render locally as bordered tables, section headings, hanging lists, nu
   │ .pdf │    89 │
   └──────┴───────┘
 
-  Worked for 0m 27s • 03:02:40
-  Tokens: 1,200 input + 340 output = 1,540
-  total (provider reported)
+  Worked for 0m 27s • 03:02:40 PM • Total Token 1,540
 ```
 
 *Illustrative layout, not a benchmark or a promise of usage for your requests.*
@@ -339,7 +422,7 @@ While a task is active, the animation continues during connection and stream wai
 
 Every new main-task response receives a permanent footer in scrollback and saved history. Side replies have their own per-question footer. The elapsed duration measures execution, excluding queue wait. Cancelled/failed tasks use explicit stopped labels.
 
-**Token accounting:** input + output = total across that task's model requests, including continuations and retries. Provider counts take precedence; missing counts are marked **estimated**, and unknown output is **unavailable**. Cached/reasoning subtotals are not added twice when already included. Counts are not billing estimates. Old conversations without saved measurements cannot retroactively recover them.
+**Token accounting:** the footer shows only **Total Token**, combined across that task's model requests, including continuations and retries. Explicit provider totals take precedence; approximate totals use **~**, and unknown totals show **unavailable**. Input/output details remain internal. Optional planning-graph workers share the parent task's usage ledger, while side-chat workers remain separate. Cached/reasoning subtotals are not added twice when already included. Counts are not billing estimates. Old conversations without saved measurements cannot retroactively recover them.
 
 ### Queue and cancellation
 
@@ -365,7 +448,9 @@ python galam.py resume
 python galam.py resume SESSION_ID
 ```
 
-The picker uses a clean full-screen view with centered conversations and a preview:
+The picker uses a clean full-screen view with centered conversations and a preview. After selection, the restored conversation uses the normal inline chat dividers, prompt arrows and assistant formatting; saved timing/token footers remain unchanged. Replaying history sends no model requests and runs no actions.
+
+Picker controls:
 
 | Key | Action |
 |---|---|
@@ -392,6 +477,8 @@ Resume replays recent messages, restores the chat's complete saved context, and 
 | `/queue` · `/queue clear` | Inspect or discard pending prompts |
 | `/cancel` | Cancel the current main task |
 | `/tasks` | Inspect/manage background tasks |
+| `/audit [directory]` | Run a read-only local security audit without an AI request |
+| `/budget [tokens\|requests\|seconds NUMBER\|off]` | Inspect, set or disable optional task spending caps |
 | `/local` | Local model testing and owned-server commands |
 | `/artifact` | Review generated artifacts |
 | `/changelog` | Render the repository's recorded updates and bug fixes |
@@ -405,7 +492,8 @@ Tab completes slash commands. The Ctrl+O and `/help` suggestion appears after th
 | Location | Purpose |
 |---|---|
 | `~/.galam_ai_settings.json` | User settings; legacy/Termux settings locations are also supported |
-| `~/.secrets` | Optional literal credential environment assignments |
+| `~/.secrets` | Credential assignments; custom editor saves keys here only |
+| `~/.galam/endpoints.json` | Custom model connections and credential variable references |
 | `storage/keys.json` | Optional local JSON credentials; Git-ignored |
 | `~/.galam_conversations/` | Saved, conversation-owned history |
 | `~/.galam/resume-ui.json` | Resume picker color preference |
@@ -422,17 +510,31 @@ Run the full local regression suite:
 python -m unittest discover -s tests -q
 ```
 
-**Latest recorded local result: 228 tests passed.** This covers action contracts, file edits, context limits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, and usage reporting. Fixture-based provider tests are distinct from live endpoint compatibility; the latest presentation update required no paid/live API requests.
+**Latest verification: all 432 tests passed in one full run, with no skips (174.179 seconds).** See the [action result recovery follow-up](artifacts/ACTION_RESULT_RECOVERY_FOLLOWUP.md), [startup workflow follow-up](artifacts/STARTUP_WORKFLOW_FOLLOWUP.md), [startup correctness repair](artifacts/STARTUP_CORRECTNESS_REPAIR.md) and [adaptive stress report](artifacts/ADAPTIVE_STRESS_RESULTS.md) for live results, measured usage, shared fixes and limitations. This includes productive work beyond the old request/token caps, context recovery, conditional recall, action contracts, file edits, conversation isolation, streaming, cancellation, queue behavior, `/btw`, resume UI, output layouts, usage reporting and security checks. Real startup tests cover build-then-Python, Python HTTP, Node, Make, Flask and Vite with a React JSX module. The recorded run supplied `GALAM_TEST_VITE` (an installed Vite entrypoint) and `GALAM_TEST_FLASK_PATH` (a Flask package directory); those two integrations skip when their fixture paths are unset. Fixtures do not add production dependencies.
+
+A separate live pilot using `minimax-m3.1-flash` on Direct Endpoint successfully served a build/Python project and a Vite project, with independent HTTP content checks. It used eight requests and 23,577 provider-reported tokens in total. This demonstrates those two cases, not universal model reliability or token savings. See the [implementation report](artifacts/CONTINUATION_RECALL_IMPLEMENTATION.md).
 
 | Lab notes | Scope |
 |---|---|
 | [Changelog](CHANGELOG.md) | Consolidated improvements and bug fixes |
+| [Launch repair](artifacts/LAUNCH_WORKFLOW_REPAIR.md) | Replaced failed command compaction/recovery and unified process execution |
+| [Command Agent](artifacts/COMMAND_AGENT.md) | Same-model startup delegation, below-input stages, repairs and shared accounting |
+| [Continuation and recall implementation](artifacts/CONTINUATION_RECALL_IMPLEMENTATION.md) | New conversation failures, startup routing, context recovery and measured live pilot |
+| [Startup correctness repair](artifacts/STARTUP_CORRECTNESS_REPAIR.md) | Correct launch evidence, verified existing services, environment hints and live selected-model checks |
+| [Adaptive builder stress plan](artifacts/ADAPTIVE_STRESS_PLAN.md) | Six user-style challenges, model handoff and independent acceptance |
+| [Adaptive stress results](artifacts/ADAPTIVE_STRESS_RESULTS.md) | Live trials, failures, token evidence and model-independent fixes |
+| [Coding stress plan](artifacts/VIBE_CODING_STRESS_PLAN.md) | Realistic multi-turn scenarios, independent acceptance and bounded live pilot |
+| [Progress and security](artifacts/PROGRESS_SECURITY.md) | Renewable work, task spending, audit checks and user identity |
+| [Server workflow fix](artifacts/SERVER_WORKFLOW_FIX.md) | Foreground inspection, actual launch commands and verified completion |
 | [Pipeline upgrade](artifacts/PIPELINE_UPGRADE_NOTES.md) | Parsing, validation, action results and recovery |
 | [Token optimization](artifacts/TOKEN_OPTIMIZATION_REPORT.md) | Context and request-budget work |
 | [Conversation scope](artifacts/CONVERSATION_CONTEXT.md) | History ownership and request context |
 | [Local model manager](artifacts/LOCAL_MODEL_MANAGER.md) | Profiles, testing and tuning |
 | [Queue and session recovery](artifacts/SESSION_RECOVERY_QUEUE_RESUME.md) | Cancellation and resume behavior |
 | [Side chat and activity](artifacts/BTW_STATUS_RESUME_UPDATE.md) | `/btw`, progress labels and resume design |
+| [NVIDIA live check](artifacts/NVIDIA_CONNECTION_CHECK.md) | Authorized live requests, verified replies and unavailable models |
+| [Custom connections](artifacts/CUSTOM_CONNECTIONS.md) | Home storage, secret handling, UI and protocol verification |
+| [Total-token footer and workflow-cost review](artifacts/TOTAL_TOKEN_FOOTER.md) | Graph-worker accounting, compact status and plan overhead |
 | [Response presentation](artifacts/RESPONSE_PRESENTATION_UPDATE.md) | Frozen completion, permanent footers and rendering |
 | [Output preview](artifacts/RESPONSE_LAYOUT_PREVIEW.txt) | Plain-text example of the terminal layout |
 

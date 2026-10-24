@@ -15,6 +15,12 @@ def get_endpoint_api_key(endpoint_name: str, provider: str = None) -> str:
        - Token prefix heuristics (nvapi-* -> NVIDIA, sk-or-* -> OpenRouter, gsk_* -> Groq, AIza* -> Gemini)
        - Generic token fallback when a single key is exported in $API_KEYS or $API_KEY
     """
+    # Standalone diagnostics can call this before the application imports config.
+    # Initialize its literal secret loader before inspecting environment aliases.
+    try:
+        import config as credential_config
+    except ImportError:
+        pass
     ep_low = (endpoint_name or "").lower().strip()
     prov_low = (provider or "").lower().strip()
 
@@ -165,6 +171,12 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
 
     headers = {"Content-Type": "application/json"}
     payload = {"stream": stream}
+
+    connection = m_info.get('custom_connection')
+    if connection:
+        api_key=os.environ.get(connection['api_key_env'],'')
+        if api_key:headers['Authorization']='Bearer '+api_key
+        return connection['url'],headers,{'model':model_name,'messages':messages,'stream':stream}
 
     # 1. CLOUDFLARE
     if endpoint_name == "Cloudflare":
@@ -343,9 +355,8 @@ def _build_request_data(endpoint_name: str, model_name: str, messages: list, str
     # 7. LOCAL ENDPOINT (llama.cpp / Ollama / Localhost)
     if endpoint_name == "Local Endpoint":
         from config import CONFIG
-        from engine.local_models import local_base_url
-        base_url = local_base_url(CONFIG)
-        url = f"{base_url}/chat/completions"
+        from engine.local_models import local_chat_url
+        url = local_chat_url(CONFIG)
         api_key = get_endpoint_api_key("Local Endpoint")
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

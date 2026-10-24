@@ -1,8 +1,9 @@
 """One lightweight argument contract shared by the existing execution paths."""
 
 TOOLS = {
+    "ask_user": {"question": str, "choices": str, "target": str, "kind": str},
     "make_directory": {"path": str},
-    "execute_bash": {"command": str, "reason": str},
+    "execute_bash": {"command": str, "reason": str, "background": bool, "readiness_url": str},
     "view_file": {"path": str, "start_line": int, "end_line": int},
     "write_file": {"path": str, "content": str, "overwrite": bool},
     "replace_file_content": {"path": str, "target_content": str, "replacement_content": str},
@@ -10,14 +11,17 @@ TOOLS = {
     "manage_tasks": {"action": str, "target": str},
     "read_action_output": {"action_id": str, "start_line": int, "end_line": int, "query": str},
     "undo_file_change": {"edit_id": str},
+    "security_audit": {"directory": str},
 }
 REQUIRED = {
+    "ask_user": ("question",),
     "make_directory": ("path",),
     "execute_bash": ("command",), "view_file": ("path",),
     "write_file": ("path", "content"),
     "replace_file_content": ("path", "target_content", "replacement_content"),
     "search_files": ("query",), "manage_tasks": (),
     "read_action_output": ("action_id",), "undo_file_change": ("edit_id",),
+    "security_audit": (),
 }
 
 
@@ -52,7 +56,7 @@ def validate_arguments(name, arguments):
                 raise ValueError(f"{key} must be a boolean")
         elif not isinstance(value, str):
             raise ValueError(f"{key} must be text")
-        if key in ("path", "command", "action_id", "edit_id") and not value.strip():
+        if key in ("path", "command", "action_id", "edit_id", "question") and not value.strip():
             raise ValueError(f"{key} must not be empty")
         result[key] = value
     return result

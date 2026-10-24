@@ -114,12 +114,109 @@ def _plain_creation(request, path):
         r"(?:[`\"']?)(?:[^\s`\"']*/)?" + name + r"(?:[`\"']?)(?:\s+file)?(?:\s+(?:for me|please))?[.!]?", request, re.I))
 
 
+def _simple_listing_receipt(request, event, directory):
+    """Answer a one-step read-only folder/file listing from its real command output."""
+    from engine.path_discovery import listing_scope
+    scope = listing_scope(request)
+    if scope and scope['recursive']:
+        try:
+            words = shlex.split(str(event['args'].get('command', '')))
+            expected_length = 4 if scope['kind'] else 2
+            if (len(words) != expected_length or words[0] != 'find'
+                    or scope['kind'] and words[2:] != ['-type', scope['kind']]):
+                return None
+            root = Path(directory, words[1]).expanduser().resolve()
+            explicit = re.findall(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', request)
+            if not root.is_dir() or explicit and root != Path(explicit[-1].rstrip('.,!?')).expanduser().resolve():
+                return None
+            output = event['result'].output.strip()
+            if not output or any(mark in words[1] for mark in ('$', '`')):
+                return None
+            from engine.result_store import compact_text
+            preview = compact_text(output, 2400)
+            if len(preview) < len(output):
+                preview += f"\n[Preview only; complete listing: read_action_output action {event['result'].action_id}.]"
+            return f'Recursive listing under `{root}`:\n' + preview
+        except (ValueError, OSError):
+            return None
+    request_words = re.sub(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', ' PATH ', request)
+    if not re.search(r'\b(?:list|show|display)\b', request_words, re.I) or not re.search(
+            r'\b(?:folders?|directories|files?|contents?)\b', request_words, re.I):
+        return None
+    if re.search(r'\b(?:create|make|write|edit|modify|change|delete|remove|build|install|start|stop|run|test|verify|deploy)\b',
+                 request_words, re.I):
+        return None
+    command = str(event['args'].get('command', ''))
+    # Accept only a plain `ls` (optionally after `cd`); pipes, commands with
+    # side effects, and truncated listings need normal model interpretation.
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|<>')
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    if any(token in (';', '|', '||', '>', '<', '>>') for token in tokens):
+        return None
+    segments, current = [], []
+    for token in tokens + ['&&']:
+        if token == '&&':
+            if current:
+                segments.append(current)
+            current = []
+        else:
+            current.append(token)
+    if not segments or sum(segment[0] == 'ls' for segment in segments) != 1 or any(
+            segment[0] not in ('cd', 'ls') for segment in segments):
+        return None
+    if any(segment[0] == 'cd' and len(segment) != 2 for segment in segments):
+        return None
+    from engine.task_progress import TaskProgress
+    if TaskProgress.listing_evidence(command, directory) is None:
+        return None
+
+    requested_paths = re.findall(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', request)
+    cwd = Path(directory).expanduser().resolve()
+    listed_path = None
+    for segment in segments:
+        if segment[0] == 'cd':
+            cwd = Path(cwd, segment[1]).expanduser().resolve()
+        else:
+            targets = [value for value in segment[1:] if not value.startswith('-')]
+            if len(targets) > 1:
+                return None
+            listed_path = Path(cwd, targets[0]).expanduser().resolve() if targets else cwd
+    if requested_paths:
+        requested = Path(requested_paths[-1].rstrip('.,:!?')).expanduser().resolve()
+        if requested != listed_path:
+            return None
+
+    result = re.sub(r'\x1b\[[0-9;]*m', '', event['result'].output).strip()
+    if not result:
+        return None
+    if len(result.splitlines()) == 1 and re.match(r'^l\S*\s+.* -> ', result):
+        return None  # Link metadata is not directory contents.
+    if (re.search(r'\b(?:folders?|directories)\b', request_words, re.I) and
+            not re.search(r'\b(?:files?|contents?)\b', request_words, re.I)):
+        folders = []
+        for line in result.splitlines():
+            fields = line.split(None, 8)
+            if len(fields) == 9 and fields[0].startswith('d') and fields[8] not in ('.', '..'):
+                folders.append(fields[8])
+        if folders:
+            label = str(listed_path)
+            return f"Folders in `{label}`:\n" + '\n'.join(f'- {name}' for name in folders)
+    from engine.result_store import compact_text
+    return 'Directory listing completed successfully:\n' + compact_text(result, 2400)
+
+
 def completed_simple_request(request, events, pending_checks, directory):
     """Return a final receipt only when no task interpretation remains necessary.
 
     Complex changes, failures, multi-step requests and pending checks keep the
     existing model-driven continuation. No model name or UI preference is used.
     """
+    events = [event for event in events if not (event['tool'] == 'ask_user' and event['result'].success
+              and event['result'].metadata.get('resolution') in ('answered', 'discovered'))]
     if pending_checks or not events or not all(event["result"].success for event in events):
         return None
     request = _request_body(request)
@@ -170,6 +267,9 @@ def completed_simple_request(request, events, pending_checks, directory):
     if len(commands) != 1 or any(event["tool"] not in ("execute_bash", "view_file", "search_files") for event in events):
         return None
     event = commands[0]
+    listing = _simple_listing_receipt(request, event, directory)
+    if listing:
+        return listing
     from engine.token_policy import enabled
     from config import CONFIG
     expected = explicit_report_command(request) if enabled(CONFIG, 'receipts') else None

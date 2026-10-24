@@ -82,6 +82,9 @@ def view_file(path: str, start_line: int = 1, end_line: int = 200) -> str:
         return f"Error: File not found at '{path}' (resolved: '{abs_path}')"
     if os.path.isdir(abs_path):
         return f"Error: '{path}' is a directory, not a file."
+    from engine.security import sensitive_path
+    if sensitive_path(abs_path):
+        return 'Error: Credential files are protected; inspect or configure them locally.'
 
     try:
         with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
@@ -197,38 +200,89 @@ def replace_file_content(path: str, target_content: str, replacement_content: st
         return f"Error: Replacing content in '{path}' failed: {str(e)}"
 
 def search_files(query: str, directory: str = ".", max_results: int = 50) -> str:
-    """Search for files by pattern or grep inside files."""
+    """Filename globs search names; other queries search project text, then names.
+
+    Runtime transcripts and generated dependency trees are not project context.
+    Call view_file explicitly when a diagnostic log is actually needed.
+    """
+    import fnmatch
+    import time
+    from pathlib import Path
+    from engine.security import sensitive_path
+
     abs_dir = os.path.abspath(os.path.expanduser(directory))
-    if not os.path.exists(abs_dir):
+    if not os.path.isdir(abs_dir):
         return f"Error: Directory not found at '{directory}'."
-
-    # Try fast ripgrep or grep
+    max_results = max(1, min(int(max_results), 200))
+    excluded = {'.git', '__pycache__', '.ssh', '.aws', 'node_modules', '.venv', 'venv',
+                'logs', 'conversations', '.galam_conversations', '.galam', '.galam_state'}
+    state_dir = os.environ.get('GALAM_STATE_DIR')
+    state_path = Path(state_dir).expanduser().resolve() if state_dir else None
+    is_glob = any(char in query for char in '*?[')
     try:
-        cmd = ["grep", "-rnI", "--exclude-dir=.git", "--exclude-dir=__pycache__", query, abs_dir]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
-        lines = res.stdout.strip().splitlines()
-        if lines:
-            trimmed = lines[:max_results]
-            out = "\n".join(trimmed)
-            if len(lines) > max_results:
-                out += f"\n... and {len(lines) - max_results} more matches."
-            return f"Matches for '{query}' in {abs_dir}:\n{out}"
-    except Exception:
-        pass
-
-    # Fallback: filename search
-    matches = []
-    for root, dirs, files in os.walk(abs_dir):
-        if ".git" in dirs:
-            dirs.remove(".git")
-        if "__pycache__" in dirs:
-            dirs.remove("__pycache__")
-        for f in files:
-            if query.lower() in f.lower():
-                matches.append(os.path.join(root, f))
-                if len(matches) >= max_results:
+        expression = re.compile(query) if not is_glob else None
+    except re.error as error:
+        return f"Error: Invalid search expression: {error}"
+    names, matches = [], []
+    started = time.monotonic()
+    partial = False
+    # Read authored source before generated bundles/root documents can exhaust
+    # the existing result budget. Each directory is searched once.
+    source_roots = [os.path.join(abs_dir, name) for name in ('src', 'app', 'lib', 'components')
+                    if os.path.isdir(os.path.join(abs_dir, name)) and not os.path.islink(os.path.join(abs_dir, name))] if not is_glob else []
+    visited = set()
+    def walk():
+        for base in source_roots + [abs_dir]:
+            for root, dirs, files in os.walk(base, followlinks=False):
+                real = os.path.realpath(root)
+                if real in visited:
+                    dirs[:] = []
+                    continue
+                visited.add(real)
+                yield root, dirs, files
+    for root, dirs, files in walk():
+        dirs[:] = sorted(name for name in dirs if name not in excluded
+                         and not Path(root, name).is_symlink()
+                         and Path(root, name).resolve() != state_path)
+        for name in sorted(files):
+            if time.monotonic() - started > 10:
+                partial = True
+                break
+            path = Path(root, name)
+            if not is_glob and (name.endswith(('.chat.history.md', '.input.history')) or name == '.history'):
+                continue
+            if path.is_symlink() or sensitive_path(path):
+                continue
+            relative = str(path.relative_to(abs_dir))
+            name_matches = (fnmatch.fnmatch(name, query) or fnmatch.fnmatch(relative, query)
+                            if is_glob else query.lower() in name.lower())
+            if name_matches:
+                names.append(str(path))
+                if is_glob and len(names) >= max_results:
+                    partial = True
                     break
-
-    if matches:
-        return f"Found matching files in {abs_dir}:\n" + "\n".join(matches)
-    return f"No matches found for '{query}' in '{abs_dir}'."
+            if is_glob:
+                continue
+            try:
+                if path.stat().st_size > 1_000_000:
+                    continue
+                with path.open(encoding='utf-8') as source:
+                    for number, line in enumerate(source, 1):
+                        if '\x00' in line:
+                            break
+                        if expression.search(line):
+                            matches.append(f"{path}:{number}:{line.rstrip()[:1000]}")
+                            if len(matches) >= max_results:
+                                partial = True
+                                break
+            except (OSError, UnicodeError):
+                continue
+            if len(matches) >= max_results:
+                break
+        if partial:
+            break
+    found = names[:max_results] if is_glob or not matches else matches
+    if found:
+        suffix = "\n[Search limited; narrow the directory or query for more.]" if partial else ""
+        return f"Matches for '{query}' in {abs_dir}:\n" + "\n".join(found) + suffix
+    return f"No matches found for '{query}' in '{abs_dir}'." + (" [Search limited.]" if partial else "")

@@ -1,12 +1,13 @@
-"""One tool contract for compatible APIs, bounded repair, and text fallback."""
+"""One tool contract for compatible APIs, guided repair, and text fallback."""
 import json
 import re
 from engine.tool_registry import TOOLS, REQUIRED
 
 _UNSUPPORTED = set()
 DESCRIPTIONS = {
+    "ask_user": "Ask for essential missing input; choices is newline-separated. Optional user-named target and kind (file/directory) enable safe discovery while waiting. An exact match withdraws the unanswered question. Answers never grant execution approval; never ask for secrets.",
     "make_directory": "Create a directory and its parents. Never use write_file for folders.",
-    "execute_bash": "Run a real shell command after review.",
+    "execute_bash": "Run a real shell command after review. For any long-running service use background=true; readiness_url may specify a local HTTP(S)/TCP probe. Do not relaunch a live process just because readiness is pending.",
     "view_file": "Read numbered file lines before editing.",
     "write_file": "Create a file with complete literal content.",
     "replace_file_content": "Replace a unique inspected block; preserve other code.",
@@ -14,6 +15,7 @@ DESCRIPTIONS = {
     "manage_tasks": "List, inspect or stop Galam background tasks.",
     "read_action_output": "Retrieve stored output by action ID.",
     "undo_file_change": "Undo a Galam edit only when the user asks.",
+    "security_audit": "Read-only local audit for credential files, tracked secrets and unsafe TLS; returns findings without secret values.",
 }
 
 
@@ -27,6 +29,8 @@ def tool_schemas():
 
 def _key(endpoint, model, config):
     from storage.endpoints import ENDPOINT_REGISTRY
+    connection=ENDPOINT_REGISTRY.get(endpoint,{}).get('models',{}).get(model,{}).get('custom_connection')
+    if connection:return endpoint,model,connection['url']
     if endpoint == "Local Endpoint":
         from engine.local_models import local_base_url
         base = local_base_url(config)
@@ -38,10 +42,16 @@ def _key(endpoint, model, config):
 def options(endpoint, model, messages, config):
     from storage.conversations import scoped_messages
     messages = scoped_messages(messages)
-    # Providers with different tool wire formats keep Galam's text protocol.
-    if endpoint not in {"Local Endpoint", "OpenRouter", "NVIDIA", "Groq", "ModelScope", "Cloudflare", "Agent Router"}:
+    from engine.context_manager import is_user_request
+    human = max((i for i, message in enumerate(messages) if is_user_request(message)), default=-1)
+    if any(message.get('_galam_force_text_tools') for message in messages[human + 1:]):
         return {}
-    if endpoint == "Cloudflare":
+    # Providers with different tool wire formats keep Galam's text protocol.
+    from storage.endpoints import ENDPOINT_REGISTRY
+    custom=ENDPOINT_REGISTRY.get(endpoint,{}).get('models',{}).get(model,{}).get('custom_connection')
+    if not custom and endpoint not in {"Local Endpoint", "OpenRouter", "NVIDIA", "Groq", "ModelScope", "Cloudflare", "Agent Router"}:
+        return {}
+    if endpoint == "Cloudflare" and not custom:
         from storage.endpoints import ENDPOINT_REGISTRY
         if ENDPOINT_REGISTRY.get(endpoint, {}).get("models", {}).get(model, {}).get("route_type") != "v1":
             return {}
@@ -55,6 +65,8 @@ def options(endpoint, model, messages, config):
     if mode == "none" or mode is None and not contextual_action(messages):
         return {}
     schemas = tool_schemas()
+    if not re.search(r'\b(?:security|secrets?|credentials?|audit)\b', latest_request(messages), re.I):
+        schemas = [tool for tool in schemas if tool['function']['name'] != 'security_audit']
     from engine.token_policy import enabled
     from engine.completion import explicit_report_command
     from engine.context_manager import is_user_request
@@ -69,6 +81,7 @@ def options(endpoint, model, messages, config):
     if contract.complete_scope:
         kinds = {r["kind"] for r in contract.requirements}
         allowed = ({"make_directory"} if "directory" in kinds else set())
+        allowed.add('ask_user')
         if "file" in kinds:
             allowed.update(("write_file", "view_file", "replace_file_content"))
         schemas = [tool for tool in schemas if tool["function"]["name"] in allowed]
@@ -94,31 +107,51 @@ def reject_unsupported(response, endpoint, model, config, payload):
 
 def needs_clarification(text):
     return bool("?" in text and re.search(
-        r"\b(?:which|what|where)\s+(?:file|folder|path|directory|name|command|model|endpoint|content)|"
+        r"\b(?:which|what|where)\s+(?:project|app|service|port|file|folder|path|directory|name|command|model|endpoint|content)|"
         r"\b(?:could|can)\s+you\s+(?:clarify|provide|specify)|\bplease\s+(?:clarify|provide|specify)", text, re.I))
 
 
 class ActionRepair:
-    """Change the protocol once; do not repeat the same no-progress exchange."""
+    """Diagnose failed action syntax without executing guessed arguments."""
     def __init__(self):
         self.responses = set()
-        self.attempts = {}
+        self.syntax_failures = set()
 
     def next_message(self, request, response, progress):
         signature = (progress, re.sub(r"\s+", " ", response).strip().lower())
-        count = self.attempts.get(progress, 0)
-        if signature in self.responses or count >= 2:
-            return None
+        repeated = signature in self.responses
         self.responses.add(signature)
-        self.attempts[progress] = count + 1
-        return {"role": "user", "_galam_internal": True, "_galam_tool_mode": "required", "content": (
+        diagnostic = ''
+        xml = False
+        if re.search(r'<tool_call>', response, re.I) and not re.search(r'</tool_call>', response, re.I):
+            diagnostic = '\nThe tool_call closing tag is missing. Nothing was executed. Regenerate one complete call; do not continue or splice the broken JSON.'
+        block = re.search(r'<tool_call>(.*?)</tool_call>', response, re.S | re.I)
+        if block:
+            try:
+                json.loads(block[1])
+            except json.JSONDecodeError as error:
+                name = re.search(r'"name"\s*:\s*"([a-z_]+)"', block[1])
+                signature = (name[1] if name else '', error.msg)
+                xml = signature in self.syntax_failures
+                self.syntax_failures.add(signature)
+                diagnostic = (f"\nRejected tool JSON: {error.msg} at line {error.lineno}, column {error.colno}. "
+                              "This proposed action was NOT executed; its claimed changes are unverified. "
+                              "Correct and resend that action before dependent commands. Escape embedded double quotes "
+                              "and backslashes in JSON strings, or use a shorter unique inspected replacement block.")
+        if xml:
+            return {"role":"user", "_galam_internal":True, "_galam_guidance":"protocol",
+                    "_galam_tool_mode":"required", "_galam_force_text_tools":True, "_galam_text_syntax":"xml",
+                    "content":"[Action protocol repair] Repeated invalid JSON; no proposed edit was executed. "
+                              "Use the supplied XML parameter interface instead. Resend the failed edit with exact inspected "
+                              "content before retrying dependent commands. Preserve unrelated code and review decisions."}
+        return {"role": "user", "_galam_internal": True, "_galam_guidance":"protocol", "_galam_tool_mode": "required", "content": (
             "[Action protocol repair] The task is not complete. No complete tool call was returned for the remaining task. "
             "Do not repeat an announcement. Use the tool interface now. If native tools are unavailable, "
             "return exactly one complete <tool_call>{\"name\":\"TOOL_NAME\",\"arguments\":{...}}</tool_call>. "
             "Choose a real tool and all required arguments from the available contract. "
             "Use literal file content, not undefined shell variables. Preserve unrelated files. "
             "If essential input is missing, ask one concrete question rather than guessing. "
-            f"Original request: {request}")}
+            + diagnostic + ('\nThe same announcement already failed. Change the action format or inspect the specific blocker; do not repeat it.' if repeated else ''))}
 
 
 def wire_text_messages(messages):

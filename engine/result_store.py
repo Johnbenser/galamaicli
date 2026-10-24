@@ -3,7 +3,6 @@
 import os
 import re
 import tempfile
-import time
 import hashlib
 from pathlib import Path
 
@@ -53,6 +52,8 @@ def archive_context(text):
 
 
 def store_result(result):
+    from engine.security import redact
+    result.output = redact(result.output)
     if result.output_path:
         return result
     try:
@@ -64,12 +65,8 @@ def store_result(result):
         if len(result.output) > 12000:
             result.output = compact_text(result.output, 11600)
             result.output += f"\n[Full output: action {result.action_id}; use read_action_output]"
-        # Bound retained output by age and count without touching current results.
-        entries = sorted(directory.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-        now = time.time()
-        for index, old in enumerate(entries):
-            if index >= 500 or now - old.stat().st_mtime > 7 * 86400:
-                old.unlink(missing_ok=True)
+        # Exact evidence may still be referenced by a long/resumed conversation.
+        # Never expire it by an unrelated action count or wall-clock age.
     except OSError:
         # An unavailable output store must not change an already executed action's status.
         result.output = compact_text(result.output, 12000)

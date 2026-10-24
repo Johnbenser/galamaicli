@@ -1,6 +1,7 @@
 """Recoverable active-task compaction; never rewrite saved conversations or user requests."""
 import copy
 import json
+import re
 
 from engine.result_store import archive_context, compact_text
 
@@ -9,12 +10,15 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
     rows = copy.deepcopy(rows)
     mandatory = set(mandatory)
     changed = set()
+    latest_call = max((i for i, row in enumerate(rows) if row.get('tool_calls')), default=-1)
+    recent = set(range(latest_call, len(rows))) if latest_call >= 0 else {len(rows)-1}
 
     def cost():
         return sum(estimate(rows[i]) + 8 for i in mandatory)
 
-    def preview(text, limit):
-        reference = archive_context(text)
+    def preview(text, limit, original):
+        info = original.get('_galam_action', {})
+        reference = info.get('source_id') or info.get('id') or archive_context(text)
         return (compact_text(text, limit) +
                 f'\n[Partial historical context; exact text: read_action_output(action_id="{reference}"). '
                 'Retrieve the needed lines before editing; omitted source is not inspected evidence.]')
@@ -33,8 +37,10 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
             row = rows[i]
             original = originals[i]
             text = str(original.get('content', ''))
-            if len(text) > limit + 300:
-                row['content'] = preview(text, limit)
+            # A targeted small answer must survive the next decision intact,
+            # even when returned beside a much larger source-file observation.
+            if len(text) > limit + 300 and not (i in recent and len(text) <= 1200):
+                row['content'] = preview(text, limit, original)
                 changed.add(i)
             calls = original.get('tool_calls')
             if calls and len(json.dumps(calls)) > limit + 300:
@@ -50,7 +56,7 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
                     if not isinstance(arguments, dict):
                         continue
                     for key, value in arguments.items():
-                        if isinstance(value, str) and len(value) > limit:
+                        if key not in ('command','path') and isinstance(value, str) and len(value) > limit:
                             arguments[key] = compact_text(value, limit)
                     function['arguments'] = json.dumps(arguments, ensure_ascii=False)
                 row['tool_calls'] = reduced
@@ -81,7 +87,21 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
         removed.extend(sorted(group))
         mandatory.difference_update(group)
     if removed:
-        record = '\n\n'.join(json.dumps(originals[i], ensure_ascii=False, default=str) for i in removed)
+        def canonical(original):
+            # Avoid duplicate internal/native call aliases and archive-of-archive bodies.
+            info = original.get('_galam_action', {})
+            source = info.get('source_id') or info.get('id')
+            calls = original.get('tool_calls') or original.get('_galam_tool_calls')
+            row = {'role': original.get('role'), 'content': original.get('content', '')}
+            if source:
+                row['content'] = (compact_text(row['content'], 320)
+                    + f'\nExact original result: read_action_output(action_id="{source}").')
+            if calls:
+                row['tool_calls'] = calls
+            if original.get('tool_call_id'):
+                row['tool_call_id'] = original['tool_call_id']
+            return row
+        record = '\n\n'.join(json.dumps(canonical(originals[i]), ensure_ascii=False, default=str) for i in removed)
         reference = archive_context(record)
         # Reserve one explicit, recoverable task-log marker in the chronological slot.
         first = removed[0]
@@ -92,4 +112,28 @@ def fit_task(rows, originals, mandatory, available, estimate, is_request):
         mandatory.add(first)
         changed.update(removed)
         # If the marker tips a very tight budget over, the caller reports a real limit.
+    # Tight windows may not fit several latest results plus protocol overhead.
+    # Keep recoverable previews, while preserving native call/result grouping.
+    for limit in (180, 80):
+        for i in sorted(mandatory, key=lambda i: estimate(rows[i]), reverse=True):
+            if cost() <= available:
+                break
+            if is_request(originals[i]) or rows[i].get('tool_calls'):
+                continue
+            text = str(rows[i].get('content',''))
+            if text.startswith('[Workflow recovery]'):
+                rows[i]['content']='[Workflow recovery] Use retained evidence; choose another useful action.'
+            elif text.startswith('[Earlier task exchanges archived'):
+                reference=re.search(r'action_id="([a-f0-9]{32})"',text)
+                if reference:
+                    rows[i]['content']=f'[Earlier task archived: read_action_output(action_id="{reference[1]}"). Original user requirements still apply.]'
+            elif len(text)>limit+200:
+                original=originals[i]
+                info=original.get('_galam_action',{})
+                reference=info.get('source_id') or info.get('id') or archive_context(str(original.get('content','')))
+                errors=[line for line in str(original.get('content','')).splitlines()
+                        if any(word in line for word in ('Error:', 'SyntaxError', 'ModuleNotFoundError','[Exit status'))]
+                excerpt=compact_text('\n'.join(errors) if errors else str(original.get('content','')),limit)
+                rows[i]['content']=excerpt+f'\n[Partial result; original: read_action_output(action_id="{reference}"). Retrieve exact source before edits.]'
+            changed.add(i)
     return rows, mandatory, len(changed)

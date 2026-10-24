@@ -10,6 +10,7 @@ from engine.local_commands import background_job
 from engine.local_profiles import (add_profile, enabled, profiles, selected_profile, scan_gguf,
                                    server_command, size_label, test_connection)
 from engine.local_tuning import cycle_tuning, effective_tuning
+from engine.local_models import local_base_url, local_models_url, local_chat_url
 
 
 def _safe(value):
@@ -46,6 +47,7 @@ class LocalScreens:
         self.busy = False
         self._lock = threading.Lock()
         self._generation = 0
+        self.return_screen = "local"
 
     def main_item(self):
         profile = selected_profile(self.config)
@@ -78,39 +80,54 @@ class LocalScreens:
         if screen in ("local_result", "local_add"):
             with self._lock:
                 rows = copy.deepcopy(self.rows)
-            return rows + [{"label": "Back to Local Models", "action": "local_back"}]
+            back_label = "Back to Model Profiles" if self.return_screen == "local_profiles" else "Back to Local Models"
+            return rows + [{"label": back_label, "action": "local_back"}]
+        if screen == "local":
+            selected = selected_profile(self.config)
+            profiles_hint = (selected.get("name", "") if selected else "No model selected")
+            base = local_base_url(self.config)
+            return [
+                {"label": "Server Connection", "hint": base, "action": "local_server"},
+                {"label": "Model Profiles", "hint": f"{len(profiles(self.config))} saved · {profiles_hint}", "action": "local_profiles"},
+                {"label": "Tuning", "hint": str((self.config.get("local_tuning") or {}).get("mode", "auto")).upper(), "action": "local_tuning"},
+                {"label": "Test connection", "hint": "Check GET models + POST chat", "action": "local_test"},
+                {"label": "Back to Settings", "action": "local_settings"},
+            ]
+        if screen == "local_profiles":
+            selected = selected_profile(self.config)
+            rows = []
+            for profile in profiles(self.config):
+                try:
+                    size = size_label(Path(profile["path"]).stat().st_size)
+                except OSError:
+                    size = "missing"
+                rows.append({"label": _safe(profile.get("name", Path(profile["path"]).name)),
+                             "hint": ("✓ selected · " if selected and selected["path"] == profile["path"] else "") + size,
+                             "action": "local_activate", "profile": profile})
+            rows.extend([{"label": "+ Add GGUF model", "action": "local_scan"},
+                         {"label": "Back to Local Models", "action": "local_overview"}])
+            return rows
+        if screen == "local_tuning":
+            saved = self.config.get("local_tuning") or {}
+            mode = saved.get("mode", "auto") if isinstance(saved, dict) else "auto"
+            rows = [{"label": "Tuning mode", "hint": mode.upper(), "action": "local_tune", "field": "mode"}]
+            values = effective_tuning(self.config)
+            if mode == "manual":
+                values = values or {"temperature": .2, "max_tokens": 512, "context_window": 4096}
+                from engine.context_manager import model_limits
+                model = (selected_profile(self.config) or {}).get("path", self.config.get("active_model", ""))
+                window, output, _ = model_limits("Local Endpoint", model, self.config)
+                effective = {**values, "context_window": window, "max_tokens": output}
+                for field, label in [("temperature", "Temperature"), ("max_tokens", "Max tokens"), ("context_window", "Context window")]:
+                    configured = saved.get(field, values[field])
+                    hint = str(configured) if configured == effective[field] else f"{configured} → {effective[field]} effective"
+                    rows.append({"label": label, "hint": hint, "action": "local_tune", "field": field})
+            elif values:
+                rows.append({"label": "Auto estimate", "hint": f"temp {values['temperature']} · {values['max_tokens']} tokens · ctx {values['context_window']}", "action": "local_noop"})
+            rows.append({"label": "Back to Local Models", "action": "local_overview"})
+            return rows
         if screen != "local":
             return []
-        selected = selected_profile(self.config)
-        rows = []
-        for profile in profiles(self.config):
-            try:
-                size = size_label(Path(profile["path"]).stat().st_size)
-            except OSError:
-                size = "missing"
-            rows.append({"label": _safe(profile.get("name", Path(profile["path"]).name)),
-                         "hint": ("✓ selected · " if selected and selected["path"] == profile["path"] else "") + size,
-                         "action": "local_activate", "profile": profile})
-        saved = self.config.get("local_tuning") or {}
-        mode = saved.get("mode", "auto") if isinstance(saved, dict) else "auto"
-        rows.extend([{"label": "+ Add model", "action": "local_scan"},
-                     {"label": "Test connection", "action": "local_test"},
-                     {"label": "Tuning: " + mode.upper(), "action": "local_tune", "field": "mode"}])
-        values = effective_tuning(self.config)
-        if mode == "manual":
-            values = values or {"temperature": .2, "max_tokens": 512, "context_window": 4096}
-            from engine.context_manager import model_limits
-            model = (selected or {}).get("path", self.config.get("active_model", ""))
-            window, output, _ = model_limits("Local Endpoint", model, self.config)
-            effective = {**values, "context_window": window, "max_tokens": output}
-            for field, label in [("temperature", "Temperature"), ("max_tokens", "Max tokens"), ("context_window", "Context window")]:
-                configured = saved.get(field, values[field])
-                hint = str(configured) if configured == effective[field] else f"{configured}→{effective[field]}"
-                rows.append({"label": label, "hint": hint, "action": "local_tune", "field": field})
-        elif values:
-            rows.append({"label": "Auto estimate", "hint": f"temp {values['temperature']} · {values['max_tokens']} tokens · ctx {values['context_window']}", "action": "local_noop"})
-        rows.append({"label": "Back to Settings", "action": "local_settings"})
-        return rows
 
     def _job(self, work, transform, invalidate):
         with self._lock:
@@ -137,12 +154,20 @@ class LocalScreens:
             return "main"
         if action == "local_settings":
             return "main"
+        if action == "local_overview":
+            return "local"
+        if action == "local_profiles":
+            return "local_profiles"
+        if action == "local_tuning":
+            return "local_tuning"
+        if action == "local_server":
+            return "local_server_editor"
         if action == "local_back":
             # Dismiss the old view; a stale worker may finish but cannot replace the next view.
             with self._lock:
                 self._generation += 1
                 self.busy = False
-            return "local"
+            return self.return_screen
         if action == "local_noop":
             return None
         if action == "local_tune":
@@ -150,9 +175,10 @@ class LocalScreens:
             if item["field"] in ("context_window", "mode"):
                 profile = selected_profile(self.config)
                 if profile:
+                    self.return_screen = "local_tuning"
                     self.rows = message_rows("Tuning saved; context changes require a server restart.\n" + server_command(profile, self.config))
                     return "local_result"
-            return "local"
+            return "local_tuning"
         if action in ("local_activate", "local_add_profile"):
             try:
                 profile = item.get("profile") or add_profile(item["path"], self.config, self.save)
@@ -160,8 +186,10 @@ class LocalScreens:
             except (ValueError, OSError, KeyError, TypeError) as error:
                 message = str(error)
             self.rows = message_rows(message + "\n/local command prints the exact command in chat.")
+            self.return_screen = "local_profiles"
             return "local_result"
         if action == "local_scan":
+            self.return_screen = "local_profiles"
             def transform(result):
                 if isinstance(result, dict):
                     return [{"label": result["diagnosis"], "action": "local_noop"}]
@@ -172,6 +200,7 @@ class LocalScreens:
                 return "local_add"
             return "local_result"
         if action == "local_test":
+            self.return_screen = "local"
             snapshot = copy.deepcopy(dict(self.config))
             profile = selected_profile(snapshot)
             def transform(report):

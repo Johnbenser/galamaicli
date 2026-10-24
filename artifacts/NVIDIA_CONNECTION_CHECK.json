@@ -1,0 +1,157 @@
+{
+  "checked_at": "2026-10-21T06:36:29.558256+08:00",
+  "provider": "NVIDIA",
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "catalog_http": 200,
+  "catalog_model_count": 81,
+  "latest_results": [
+    {
+      "model": "deepseek-ai/deepseek-v4.1-flash",
+      "http": 200,
+      "seconds": 1.07,
+      "status": "responded",
+      "reply": "OK",
+      "usage": {
+        "prompt_tokens": 35,
+        "completion_tokens": 16,
+        "total_tokens": 51,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 13
+        }
+      }
+    },
+    {
+      "model": "moonshotai/kimi-k3",
+      "http": 410,
+      "seconds": 0.23,
+      "status": "rejected",
+      "diagnosis": ""
+    },
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "http": 200,
+      "seconds": 7.18,
+      "status": "responded",
+      "reply": "OK",
+      "usage": {
+        "prompt_tokens": 17,
+        "completion_tokens": 131,
+        "total_tokens": 148,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 131,
+          "rejected_prediction_tokens": null
+        }
+      }
+    },
+    {
+      "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "http": 200,
+      "seconds": 1.74,
+      "status": "responded",
+      "reply": "OK",
+      "usage": {
+        "prompt_tokens": 21,
+        "completion_tokens": 126,
+        "total_tokens": 147,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 123,
+          "rejected_prediction_tokens": null
+        }
+      }
+    },
+    {
+      "model": "poolside/laguna-xs-2.1",
+      "http": 200,
+      "seconds": 0.79,
+      "status": "responded",
+      "reply": "OK.",
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 3,
+        "total_tokens": 21
+      }
+    },
+    {
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "http": 200,
+      "seconds": 1.89,
+      "status": "responded",
+      "reply": "OK",
+      "usage": {
+        "prompt_tokens": 21,
+        "completion_tokens": 23,
+        "total_tokens": 44
+      }
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "http": 200,
+      "seconds": 23.28,
+      "status": "responded",
+      "reply": "OK",
+      "usage": {
+        "prompt_tokens": 17,
+        "completion_tokens": 68,
+        "total_tokens": 85,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 68
+        }
+      }
+    },
+    {
+      "model": "google/gemma-4-31b-it",
+      "status": "transport_error",
+      "error_type": "ReadTimeout",
+      "seconds": 60.13
+    }
+  ],
+  "streaming_pipeline_checks": [
+    {
+      "endpoint": "NVIDIA",
+      "model": "poolside/laguna-xs-2.1",
+      "status": "responded",
+      "reply": "{\"name\": \"CONNECTION_OK\", \"arguments\": {}}",
+      "seconds": 3.03,
+      "usage": {
+        "source": "estimated",
+        "input": 251,
+        "output": 14,
+        "total": 265,
+        "requests": 1
+      }
+    },
+    {
+      "endpoint": "NVIDIA",
+      "model": "deepseek-ai/deepseek-v4.1-flash",
+      "status": "responded",
+      "reply": "CONNECTION_OK",
+      "seconds": 0.92,
+      "usage": {
+        "source": "provider",
+        "input": 199,
+        "output": 20,
+        "total": 219,
+        "requests": 1
+      }
+    }
+  ],
+  "limits": "Tiny synthetic prompts only. Six models returned final replies; Gemma timed out at 30 and 60 seconds; Kimi K3 returned HTTP 410. These are point-in-time observations, not uptime or speed guarantees. Timed-out requests have unknown usage."
+}

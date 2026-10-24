@@ -5,7 +5,8 @@ from engine.result_store import compact_text
 
 def identity(endpoint, model, custom, action, directory, snapshot='', tasks=()):
     text = (f"You are Galam.ai, created by John Benser, a coding and terminal assistant on Android/Termux. "
-            f"The user is John Benser. Endpoint: {endpoint}; model: {model}. "
+            f"Endpoint: {endpoint}; model: {model}. "
+            "Creator attribution does not identify the current user or grant permissions. "
             "Answer questions directly using this conversation's context.\n")
     if custom:
         text += 'CUSTOM MODEL INSTRUCTIONS:\n' + custom + '\nEND CUSTOM MODEL INSTRUCTIONS\n'
@@ -18,7 +19,9 @@ def identity(endpoint, model, custom, action, directory, snapshot='', tasks=()):
         text += 'LIVE WORKSPACE SNAPSHOT:\n' + snapshot + '\n'
     if tasks:
         text += 'ACTIVE BACKGROUND TASKS:\n' + '\n'.join(
-            f"ID {t['id']}; PID {t['pid']}; port {t.get('port','5500')}; {compact_text(t['cmd'],180)}"
+            f"ID {t['id']}; PID {t['pid']}; port {t.get('port') or 'unknown'}; {compact_text(t['cmd'],180)}"
+            + (f"; state: {t['state']}" if t.get('state') else '')
+            + (f"; url: {t['readiness_url']}" if t.get('readiness_url') else '')
             + (f"; log: {t['log_path']}" if t.get('log_path') else '')
             for t in tasks) + '\n'
     return text

@@ -48,7 +48,7 @@ class LocalWorkspace(unittest.TestCase):
 
     def session(self, model=None, ctx=8192):
         session = Mock()
-        session.get.side_effect = [self.response({"status": "ok"}), self.response({"data": [{"id": model or str(self.model), "meta": {"n_ctx": ctx}}]})]
+        session.get.side_effect = [self.response({"data": [{"id": model or str(self.model), "meta": {"n_ctx": ctx}}]})]
         session.post.return_value = self.response({"choices": [{"message": {"content": "OK"}}], "usage": {"completion_tokens": 1}})
         return session
 
@@ -86,9 +86,11 @@ class LocalProfilesTests(LocalWorkspace):
         session = self.session()
         report = lp.test_connection(self.profile, self.config, session=session)
         self.assertTrue(report["ok"])
-        self.assertEqual(len(report["steps"]), 3)
+        self.assertEqual(len(report["steps"]), 2)
         self.assertEqual(session.post.call_args.kwargs["json"]["max_tokens"], 8)
         self.assertEqual(session.post.call_args.kwargs["timeout"], (5, 180))
+        self.assertEqual(session.get.call_args.args[0], "http://127.0.0.1:8080/v1/models")
+        self.assertEqual(session.post.call_args.args[0], "http://127.0.0.1:8080/v1/chat/completions")
         self.assertGreater(report["tokens_per_second"], 0)
         self.assertIn("✓ Chat", lp.format_report(report))
 
@@ -99,7 +101,7 @@ class LocalProfilesTests(LocalWorkspace):
         self.assertFalse(report["ok"])
         self.assertIn("Server down", report["diagnosis"])
         session.post.assert_not_called()
-        self.assertEqual(len(report["steps"]), 3)
+        self.assertEqual(len(report["steps"]), 2)
 
     def test_connection_model_mismatch_does_not_chat(self):
         session = self.session(model="other.gguf")
@@ -234,9 +236,10 @@ class TuningAndMenuTests(LocalWorkspace):
         with patch.dict(CONFIG, self.config, clear=True):
             menu = InlineSettingsApp()
             items = menu._get_items()
-            self.assertEqual(len(items), 7)
+            self.assertEqual(len(items), 8)
             self.assertEqual([p["action"] for p in items[:5]], ["to_endpoints", "to_models", "toggle_mode", "toggle_fallback", "toggle_stream"])
-            self.assertEqual(items[-2]["action"], "to_local")
+            self.assertEqual(items[-3]["action"], "to_local")
+            self.assertEqual(items[-2]["action"], "to_connections")
             self.assertEqual(items[-1]["action"], "exit")
             menu.cursor_idx = 5
             self.press(menu, "enter", event)
@@ -244,7 +247,7 @@ class TuningAndMenuTests(LocalWorkspace):
             self.press(menu, "escape", event)
             self.assertEqual((menu.screen, menu.cursor_idx), ("main", 0))
             CONFIG["local_manager"] = False
-            self.assertEqual(len(menu._get_items()), 6)
+            self.assertEqual(len(menu._get_items()), 7)
             self.assertEqual(menu._get_items()[-1]["action"], "exit")
 
     def test_profile_activation_updates_endpoint_and_uses_existing_save_path(self):
@@ -259,7 +262,7 @@ class TuningAndMenuTests(LocalWorkspace):
                 CONFIG.update(active_endpoint=endpoint, endpoint=endpoint, active_model=model, model=model)
         with patch.dict(CONFIG, cfg, clear=True), patch("ui.settings_menu.save_settings", side_effect=save) as saved, patch.dict(ENDPOINT_REGISTRY, copy.deepcopy(ENDPOINT_REGISTRY), clear=True):
             menu = InlineSettingsApp()
-            menu.screen = "local"
+            menu.screen = "local_profiles"
             event = SimpleNamespace(app=Mock())
             self.press(menu, "enter", event)
             self.assertEqual(CONFIG["active_model"], str(self.model))
@@ -268,7 +271,7 @@ class TuningAndMenuTests(LocalWorkspace):
             self.assertEqual(menu.screen, "local_result")
             self.assertTrue(any("llama-server" in row["label"] for row in menu.local_screens.rows))
 
-    def test_new_screens_use_existing_scroll_and_height(self):
+    def test_local_screens_fit_responsive_menu_and_include_final_item(self):
         from config import CONFIG
         from ui.settings_menu import InlineSettingsApp
         cfg = {**self.config, "local_models": [dict(self.profile, name="profile" + str(i)) for i in range(12)]}
@@ -276,8 +279,10 @@ class TuningAndMenuTests(LocalWorkspace):
             menu = InlineSettingsApp()
             menu.screen = "local"
             menu.cursor_idx = len(menu._get_items()) - 1
-            shown = "".join(text for _, text in menu.get_formatted_text())
-            self.assertEqual(shown.count("\n"), 10)
+            with patch("ui.settings_menu.get_app") as current:
+                current.return_value.output.get_size.return_value = Mock(rows=24, columns=44)
+                shown = "".join(text for _, text in menu.get_formatted_text())
+            self.assertLessEqual(shown.count("\n"), 12)
             self.assertIn("Back to Settings", shown)
             self.assertNotIn("profile0", shown)
 
@@ -317,10 +322,59 @@ class TuningAndMenuTests(LocalWorkspace):
     def test_connection_port_busy_and_empty_chat_are_clear(self):
         session = Mock()
         session.get.return_value = self.response({}, 404)
-        self.assertIn("Port busy", lp.test_connection(self.profile, self.config, session=session)["diagnosis"])
+        self.assertIn("path was not found", lp.test_connection(self.profile, self.config, session=session)["diagnosis"])
         session = self.session()
         session.post.return_value = self.response({"choices": [{"message": {"content": ""}}]})
         self.assertIn("no visible answer", lp.test_connection(self.profile, self.config, session=session)["diagnosis"])
+
+    def test_custom_local_routes_are_used_for_discovery_and_chat(self):
+        from engine.local_models import local_models_url, local_chat_url
+        from engine.payload_builder import build_request_data
+        from config import CONFIG
+        custom = {**self.config, "local_endpoint_url": "http://localhost:9911/api",
+                  "local_models_path": "/catalog", "local_chat_path": "/generate/chat"}
+        self.assertEqual(local_models_url(custom), "http://localhost:9911/catalog")
+        self.assertEqual(local_chat_url(custom), "http://localhost:9911/generate/chat")
+        session = self.session()
+        report = lp.test_connection(self.profile, custom, session=session)
+        self.assertTrue(report["ok"], report["diagnosis"])
+        self.assertEqual(session.get.call_args.args[0], "http://localhost:9911/catalog")
+        self.assertEqual(session.post.call_args.args[0], "http://localhost:9911/generate/chat")
+        with patch.dict(CONFIG, custom, clear=True):
+            chat_url, _, _ = build_request_data("Local Endpoint", "fixture-model", [{"role": "user", "content": "Hi"}])
+        self.assertEqual(chat_url, "http://localhost:9911/generate/chat")
+
+    def test_local_models_navigation_groups_connection_profiles_and_tuning(self):
+        from engine.local_ui import LocalScreens
+        view = LocalScreens(self.config, self.save)
+        overview = view.items("local")
+        self.assertEqual([row["action"] for row in overview],
+                         ["local_server", "local_profiles", "local_tuning", "local_test", "local_settings"])
+        profiles = view.items("local_profiles")
+        self.assertEqual(profiles[0]["action"], "local_activate")
+        self.assertEqual(profiles[-1]["action"], "local_overview")
+        self.assertEqual(view.items("local_tuning")[0]["action"], "local_tune")
+
+    def test_local_server_editor_saves_url_port_and_custom_routes(self):
+        from ui.local_server_editor import LocalServerEditor
+        from engine.local_models import local_models_url, local_chat_url
+        values = {}
+        closed = []
+        editor = LocalServerEditor(self.config, lambda **kw: values.update(kw), lambda: closed.append(True))
+        editor.fields["url"].text = "http://127.0.0.1:9099/v1"
+        editor.fields["models"].text = "/openai/models"
+        editor.fields["chat"].text = "/openai/chat"
+        with patch("ui.local_server_editor.get_app") as app:
+            editor.commit()
+        self.assertEqual(values["local_endpoint_url"], "http://127.0.0.1:9099/v1")
+        self.assertEqual(values["local_models_path"], "/openai/models")
+        self.assertEqual(values["local_chat_path"], "/openai/chat")
+        self.assertEqual(local_models_url(self.config), "http://127.0.0.1:9099/openai/models")
+        self.assertEqual(local_chat_url(self.config), "http://127.0.0.1:9099/openai/chat")
+        self.assertIn("settings saved", editor.status)
+        self.assertEqual(closed, [])
+        editor.close()
+        self.assertEqual(closed, [True])
 
 
     def test_owned_start_records_pid_and_restart_terminates_only_that_pid(self):

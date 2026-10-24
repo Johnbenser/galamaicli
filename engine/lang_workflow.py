@@ -19,7 +19,7 @@ class PlanningState(TypedDict, total=False):
 def _typed_tools():
     from langchain_core.tools import StructuredTool
 
-    def execute_bash(command: str, reason: str = "") -> str:
+    def execute_bash(command: str, reason: str = "", background: bool = False, readiness_url: str = "") -> str:
         """Run a command after Galam checks its path and execution policy."""
         return command
 
@@ -48,8 +48,12 @@ def _typed_tools():
         """Create a directory after policy review."""
         return path
 
+    def ask_user(question: str, choices: str = '', target: str = '', kind: str = 'directory') -> str:
+        """Ask through the live dock while safe discovery checks a user-named target."""
+        return question
+
     functions = (make_directory, execute_bash, view_file, write_file,
-                 replace_file_content, search_files, manage_tasks)
+                 replace_file_content, search_files, manage_tasks, ask_user)
     return {function.__name__: StructuredTool.from_function(function)
             for function in functions}
 

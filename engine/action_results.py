@@ -52,18 +52,31 @@ def as_result(value):
 
 def request_intent(text):
     """Negated constraints and explanations must not become mutation requests."""
-    cleaned = re.sub(
-        r"\b(?:do not|don't|never)\s+(?:modify|edit|change|write|overwrite|create|delete|remove|run|execute)\b"
-        r"(?:(?!\b(?:and|but|then)\b)[^.;,\n])*", "", str(text), flags=re.I)
-    explanation = re.match(r"\s*(?:(?:please|kindly)\s+)?(?:explain|describe|what\b|why\b|how\b|compare|suggest)\b", cleaned, re.I)
-    explicit_next_action = re.search(r"\b(?:and|then)\s+(?:run|execute|fix|edit|modify|create)\b", cleaned, re.I)
+    from engine.conversation_constraints import sentences, prose_mask
+    clauses = []
+    for sentence in sentences(str(text)):
+        # A prohibition can coordinate several verbs across commas/"or". Its
+        # scope ends at a sentence or an explicit positive transition.
+        mask = prose_mask(sentence)
+        spans = list(re.finditer(r"\b(?:do not|don't|never)\b.*?(?=\b(?:but|then)\b|$)", mask, re.I))
+        for span in reversed(spans):
+            sentence = sentence[:span.start()] + ' ' + sentence[span.end():]
+        clauses.append(sentence)
+    cleaned = ' '.join(clauses)
+    prose = prose_mask(cleaned)
+    prose = re.sub(r'(?<![\w])(?:[~./\w-]*/)?[\w-]+\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*', ' ', prose)
+    prose = re.sub(r'^\s*(?:but|then|and)\s+', '', prose, flags=re.I)
+    explanation = re.match(r"\s*(?:(?:please|kindly)\s+)?(?:explain|describe|what\b|why\b|how\b|compare|suggest)\b", prose, re.I)
+    explicit_next_action = re.search(r"\b(?:and|then)\s+(?:run|execute|fix|edit|modify|create)\b", prose, re.I)
     if explanation and not explicit_next_action:
         return False, False
-    action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|open|inspect|read|list|search)\b|go to", cleaned, re.I))
-    mutation = bool(re.search(r"\b(?:edit|modify|update|change|fix|refactor|rewrite)\b", cleaned, re.I)) or requires_content(cleaned)
-    code = bool(re.search(r"\b(?:code|file|script|app|function|class|page|site|css|html|py|js|json)\b|\.(?:py|jsx?|tsx?|json|css|html)\b", cleaned, re.I))
-    navigation = bool(re.search(r"\b(?:directory|folder|mode|model|endpoint|settings|working directory)\b", cleaned, re.I))
-    return action, mutation and (code or not navigation)
+    action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|launch|restart|serve|open|inspect|check|diagnose|read|list|search|audit|analyze)\b|go to|bring\s+up", prose, re.I))
+    creation = bool(re.search(r"\b(?:create|write|make|build|implement|generate)\b", prose, re.I))
+    implementation = creation and requires_content(cleaned)
+    mutation = bool(re.search(r"\b(?:edit|modify|update|change|fix|refactor|rewrite)\b", prose, re.I)) or implementation
+    code = bool(re.search(r"\b(?:code|file|script|app|application|function|class|page|site|website|webpage|component|program|css|html|py|js|json)\b|\.(?:py|jsx?|tsx?|json|css|html)\b", cleaned, re.I))
+    navigation = bool(re.search(r"\b(?:directory|folder|mode|model|endpoint|settings|working directory)\b", prose, re.I))
+    return action, mutation and (implementation or code or not navigation)
 
 
 def requires_content(text):

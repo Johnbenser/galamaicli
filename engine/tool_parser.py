@@ -52,7 +52,14 @@ def validate_shell_command(command: str) -> Tuple[bool, str]:
     command = (command or "").strip()
     if not command:
         return False, "empty command"
-    if re.search(r'(?i)(?:your_project_name|project_name_here|replace_this|<[^>]+>|\bTODO\b)', command):
+    # Validate shell/path placeholders, not quoted HTML, regex or program text.
+    from engine.server_commands import _without_heredocs
+    shell = _without_heredocs(command)
+    visible = re.sub(r'''(?:'[^']*'|"(?:\\.|[^"\\])*")''', ' DATA ', shell)
+    if re.search(r'(?i)(?:^|[;&|]\s*)chmod\s+(?:-[A-Za-z]*R[A-Za-z]*|--recursive)\s+(?:0?[0-7]{3,4}|[ugoa]*[+=-][rwxXstugo]+)\s+', visible):
+        return False, "recursive permission changes are not a safe generic repair; diagnose the exact file or directory error and change only that path if the user requested it"
+    quoted_path = re.search(r'''\bcd\s+(?:--\s+)?(['"])(<[^>]+>|your_project_name|project_name_here)\1''', shell, re.I)
+    if quoted_path or re.search(r'(?i)(?:your_project_name|project_name_here|replace_this|<[A-Za-z_][^>;&|\n]*>|\bTODO\b)', visible):
         return False, "the command contains a placeholder rather than a real project path"
     first = command.split("&&", 1)[0].splitlines()[0].strip()
     if not _looks_like_shell_command(first):
@@ -290,7 +297,8 @@ def _validate_and_normalize_tool(fn_name: str, args: Any):
                 cmd = sub.get("command") or sub.get("cmd") or cmd
         if not str(cmd).strip():
             return None
-        args_dict = {"command": str(cmd).strip()}
+        args_dict = {"command": str(cmd).strip(), **{key: args_dict[key] for key in
+                     ('reason', 'background', 'readiness_url') if key in args_dict}}
 
     elif target_fn == "manage_tasks":
         action = args_dict.get("action") or "list"
@@ -515,8 +523,9 @@ def normalize_inbound_actions(text: str, reasoning: str = "") -> List[AgentActio
         return actions
 
     # Format 5: Functional syntax: bash(command='...') or execute_bash(command="...") or view_file(path="...")
-    func_starts = list(re.finditer(r'(?<![\w.])(make_directory|execute_bash|bash|view_file|write_file|replace_file_content|search_files|manage_tasks)\s*\(', text_content))
+    func_starts = list(re.finditer(r'(?<![\w.])(' + '|'.join(sorted(VALID_TOOLS | {'bash'})) + r')\s*\(', text_content))
     positional = {
+        "ask_user": ("question", "choices", "target", "kind"),
         "make_directory": ("path",),
         "execute_bash": ("command", "reason"), "bash": ("command", "reason"),
         "view_file": ("path", "start_line", "end_line"),
@@ -932,30 +941,6 @@ def extract_confident_command_from_reasoning(reasoning: str) -> List[Dict[str, A
                         }
                     }]
 
-    # General directory and file creation intent synthesis in reasoning
-    has_active_commitment = any(comm in conclusion_text.lower() for comm in (
-        "i will create", "i'll create", "let me create", "i'm going to create", "i am going to create",
-        "i need to create", "i will use", "i'll use", "let me run", "i will run"
-    ))
-    if has_active_commitment and not any(p in conclusion_text.lower() for p in ("the command for that is", "command would be", "already ran")):
-        dir_match = re.search(r'(?:in|inside|to)\s+(?:the\s+)?([/\w\.\-]+/[/\w\.\-]+)\s+directory', conclusion_text, re.IGNORECASE)
-        if dir_match and ("touch" in conclusion_text.lower() or "create" in conclusion_text.lower()):
-            target_dir = dir_match.group(1).strip()
-            if target_dir.startswith("/") and not any(k in target_dir.lower() for k in ("command", "tool")):
-                # If creator's name file creation is discussed:
-                if "name" in conclusion_text.lower():
-                    synth_cmd = f"mkdir -p {target_dir} && echo 'John Benser' > {target_dir}/name.txt"
-                    validated = _validate_and_normalize_tool("execute_bash", {"command": synth_cmd})
-                    if validated:
-                        norm_name, norm_args = validated
-                        return [{
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": norm_name,
-                                "arguments": json.dumps(norm_args)
-                            }
-                        }]
 
     return []
 
