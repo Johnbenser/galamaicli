@@ -116,6 +116,29 @@ def _plain_creation(request, path):
 
 def _simple_listing_receipt(request, event, directory):
     """Answer a one-step read-only folder/file listing from its real command output."""
+    from engine.path_discovery import listing_scope
+    scope = listing_scope(request)
+    if scope and scope['recursive']:
+        try:
+            words = shlex.split(str(event['args'].get('command', '')))
+            expected_length = 4 if scope['kind'] else 2
+            if (len(words) != expected_length or words[0] != 'find'
+                    or scope['kind'] and words[2:] != ['-type', scope['kind']]):
+                return None
+            root = Path(directory, words[1]).expanduser().resolve()
+            explicit = re.findall(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', request)
+            if not root.is_dir() or explicit and root != Path(explicit[-1].rstrip('.,!?')).expanduser().resolve():
+                return None
+            output = event['result'].output.strip()
+            if not output or any(mark in words[1] for mark in ('$', '`')):
+                return None
+            from engine.result_store import compact_text
+            preview = compact_text(output, 2400)
+            if len(preview) < len(output):
+                preview += f"\n[Preview only; complete listing: read_action_output action {event['result'].action_id}.]"
+            return f'Recursive listing under `{root}`:\n' + preview
+        except (ValueError, OSError):
+            return None
     request_words = re.sub(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', ' PATH ', request)
     if not re.search(r'\b(?:list|show|display)\b', request_words, re.I) or not re.search(
             r'\b(?:folders?|directories|files?|contents?)\b', request_words, re.I):
@@ -170,6 +193,8 @@ def _simple_listing_receipt(request, event, directory):
     result = re.sub(r'\x1b\[[0-9;]*m', '', event['result'].output).strip()
     if not result:
         return None
+    if len(result.splitlines()) == 1 and re.match(r'^l\S*\s+.* -> ', result):
+        return None  # Link metadata is not directory contents.
     if (re.search(r'\b(?:folders?|directories)\b', request_words, re.I) and
             not re.search(r'\b(?:files?|contents?)\b', request_words, re.I)):
         folders = []

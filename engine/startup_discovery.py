@@ -42,6 +42,15 @@ def discover(request, current_directory):
         target=candidate
     else:
         result_note=''
+        named = re.search(r'\b(?:open|enter|inside|go\s+(?:to|inside)|navigate\s+to)\s+(?:(?:my|the|folder|directory|project)\s+)*([`"\'][^`"\']+[`"\']|[\w./~-]+)(?=\s|[,.;]|$)', request, re.I)
+        if named:
+            from engine.path_discovery import candidates
+            name = named[1].strip('`"\'')
+            matches = candidates(name, current_directory)
+            if len(matches) != 1:
+                return {'directory':None, 'content': f'Named project {name!r} is missing or ambiguous near {current_directory}. Use ask_user or exact local discovery; do not assume the current directory is the requested project.'}
+            target = Path(matches[0])
+            result_note = f'Located the exact user-named project: {target}.\n'
     target=target.resolve()
     if not target.is_dir():
         return None

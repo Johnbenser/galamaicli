@@ -74,6 +74,46 @@ def command_for(operation, path):
             else 'ls -la -- ' + shlex.quote(path))
 
 
+def listing_scope(request):
+    text = re.sub(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', ' PATH ', request)
+    if (not re.search(r'\b(?:list|show|display)\b', text, re.I)
+            or not re.search(r'\b(?:folders?|directories|files?|contents?)\b', text, re.I)
+            or re.search(r'\b(?:create|make|write|edit|modify|delete|remove|build|install|start|stop|run|execute)\b', text, re.I)):
+        return None
+    files = bool(re.search(r'\bfiles?\b', text, re.I))
+    folders = bool(re.search(r'\b(?:folders?|directories)\b', text, re.I))
+    kind = 'f' if files and not folders else 'd' if folders and not files else None
+    return {'recursive': bool(re.search(r'\b(?:sub[ -]?(?:folders?|directories)|recursive(?:ly)?|nested|all levels)\b', text, re.I)),
+            'kind': kind}
+
+
+def prepare_listing(request, command, directory):
+    """Match simple model listings to the user's requested depth and real root."""
+    scope = listing_scope(request)
+    if not scope or any(mark in command for mark in (';', '|', '&', '$', '`', '\n', '>', '<')):
+        return command
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return command
+    if not words or words[0] != 'ls' or any(word in ('-d', '--directory') or word.startswith('-') and not word.startswith('--') and 'd' in word[1:] for word in words[1:]):
+        return command
+    targets = [word for word in words[1:] if not word.startswith('-')]
+    if len(targets) > 1:
+        return command
+    root = Path(directory, targets[0] if targets else '.').expanduser().resolve()
+    if not root.is_dir():
+        return command
+    explicit = re.findall(r'(?<![\w:])(?:/|~/)[^\s`"\'<>;,]+', request)
+    if explicit and Path(explicit[-1].rstrip('.,!?')).expanduser().resolve() != root:
+        return command
+    if scope['recursive']:
+        return 'find ' + shlex.quote(str(root)) + (' -type ' + scope['kind'] if scope['kind'] else '')
+    if targets and Path(directory, targets[0]).is_symlink():
+        return 'ls -la -- ' + shlex.quote(str(root))
+    return command
+
+
 def initial_action(request, directory, explicit_directory=False):
     plan = directory_request(request)
     if not plan:

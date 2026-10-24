@@ -70,7 +70,7 @@ def request_intent(text):
     explicit_next_action = re.search(r"\b(?:and|then)\s+(?:run|execute|fix|edit|modify|create)\b", prose, re.I)
     if explanation and not explicit_next_action:
         return False, False
-    action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|launch|restart|serve|open|inspect|read|list|search|audit|analyze)\b|go to|bring\s+up", prose, re.I))
+    action = bool(re.search(r"\b(?:create|write|make|build|implement|generate|edit|modify|update|change|fix|refactor|replace|delete|remove|rename|copy|move|touch|mkdir|execute|run|start|launch|restart|serve|open|inspect|check|diagnose|read|list|search|audit|analyze)\b|go to|bring\s+up", prose, re.I))
     creation = bool(re.search(r"\b(?:create|write|make|build|implement|generate)\b", prose, re.I))
     implementation = creation and requires_content(cleaned)
     mutation = bool(re.search(r"\b(?:edit|modify|update|change|fix|refactor|rewrite)\b", prose, re.I)) or implementation

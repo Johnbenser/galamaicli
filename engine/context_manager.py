@@ -228,7 +228,7 @@ def assemble_context(messages, identity, endpoint, model, config, directory):
     from engine.prompt_context import observation_content
     source = scoped_messages(messages)
     # Guidance is replaceable generated state, never another user requirement.
-    guidance = [i for i,m in enumerate(source) if m.get('_galam_guidance') in ('recovery','protocol','command_failure') or
+    guidance = [i for i,m in enumerate(source) if m.get('_galam_guidance') in ('recovery','protocol','command_failure','service_diagnosis') or
                 m.get('_galam_internal') and str(m.get('content','')).startswith('[Workflow recovery]')]
     last_guidance = {}
     for i in guidance:

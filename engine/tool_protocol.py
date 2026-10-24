@@ -123,6 +123,8 @@ class ActionRepair:
         self.responses.add(signature)
         diagnostic = ''
         xml = False
+        if re.search(r'<tool_call>', response, re.I) and not re.search(r'</tool_call>', response, re.I):
+            diagnostic = '\nThe tool_call closing tag is missing. Nothing was executed. Regenerate one complete call; do not continue or splice the broken JSON.'
         block = re.search(r'<tool_call>(.*?)</tool_call>', response, re.S | re.I)
         if block:
             try:

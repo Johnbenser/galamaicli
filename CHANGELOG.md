@@ -4,6 +4,14 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Correct listing completion and server diagnosis recovery
+
+- Fixed a directory symlink's metadata being accepted as a completed folder listing. Natural listings resolve the actual directory root and preserve requested recursive depth; explicit metadata commands keep their meaning. Directory link counts are distinguished from item counts.
+- Resolve exact user-named sibling projects before startup metadata, with clarification guidance for missing/ambiguous names. No project name or conversation lookup is hardcoded.
+- Treat check/diagnosis requests as actionable, regenerate unfinished tool markup before execution, and record unrequested broken actions as incomplete. Diagnosis without change/start authorization stays read-only.
+- Add fresh local page/asset evidence before navigation troubleshooting; HTTP success remains distinct from verified browser clicks. Prioritize authored source in content searches and omit assistant transcript contents from incidental searches.
+- Added 13 regressions; **470 tests passed**, no skips (146.879 seconds). Read-only live checks found the named project and returned HTTP 200 for the tested pages/assets; browser click behavior was not verified. See [conversation repair evidence](artifacts/CONVERSATION_0C1B6E6A_REPAIR.md).
+
 ### Terminal references and live clarification
 
 - Retrieve current path, package-script and Python/Node entrypoint facts before terminal execution. Reject concrete contradictions with declared alternatives; refresh facts after metadata changes. Keep complex commands under existing review and runtime verification. Coalesce repeated command-failure guidance without copying the whole user request again.

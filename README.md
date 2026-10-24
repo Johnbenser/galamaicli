@@ -322,6 +322,8 @@ The `ask_user` Galam Action presents a question above the existing input dock. R
 
 Simple navigation and listing requests use verified paths directly. If no target or explicit current directory is available, Galam asks which folder to use. The command worker keeps normal review rules and reports actual output.
 
+Directory listings follow a symlink to its actual root and preserve a request for subfolders. Server startup locates an exact named nearby project before reading its metadata. For local navigation/page failures, Galam gathers current HTTP route and asset evidence before source diagnosis; HTTP 200 alone does not establish working browser clicks. Incomplete action markup is repaired before execution and cannot be counted as a completed task. Content searches prioritize authored source and exclude incidental assistant transcript contents.
+
 Developers can run the offline Propose–Probe–Compose fixture check with `python tools/evaluate_terminal_workflow.py --output /path/to/report.json`. It evaluates command proposals and real disposable read commands without API calls or user-project edits. See [terminal workflow evidence](artifacts/TERMINAL_ACTION_WORKFLOW.md) for coverage and limits.
 
 ### Continuing difficult tasks

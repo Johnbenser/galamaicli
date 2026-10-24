@@ -226,7 +226,21 @@ def search_files(query: str, directory: str = ".", max_results: int = 50) -> str
     names, matches = [], []
     started = time.monotonic()
     partial = False
-    for root, dirs, files in os.walk(abs_dir, followlinks=False):
+    # Read authored source before generated bundles/root documents can exhaust
+    # the existing result budget. Each directory is searched once.
+    source_roots = [os.path.join(abs_dir, name) for name in ('src', 'app', 'lib', 'components')
+                    if os.path.isdir(os.path.join(abs_dir, name)) and not os.path.islink(os.path.join(abs_dir, name))] if not is_glob else []
+    visited = set()
+    def walk():
+        for base in source_roots + [abs_dir]:
+            for root, dirs, files in os.walk(base, followlinks=False):
+                real = os.path.realpath(root)
+                if real in visited:
+                    dirs[:] = []
+                    continue
+                visited.add(real)
+                yield root, dirs, files
+    for root, dirs, files in walk():
         dirs[:] = sorted(name for name in dirs if name not in excluded
                          and not Path(root, name).is_symlink()
                          and Path(root, name).resolve() != state_path)
@@ -235,6 +249,8 @@ def search_files(query: str, directory: str = ".", max_results: int = 50) -> str
                 partial = True
                 break
             path = Path(root, name)
+            if not is_glob and (name.endswith(('.chat.history.md', '.input.history')) or name == '.history'):
+                continue
             if path.is_symlink() or sensitive_path(path):
                 continue
             relative = str(path.relative_to(abs_dir))

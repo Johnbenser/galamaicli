@@ -224,11 +224,14 @@ class ClarificationTests(Workspace):
             return row
         messages = [{'role': 'user', 'content': 'display my folder'}]
         errors = []
+        finished = threading.Event()
         def run():
             try:
                 galam.run_agent_loop(messages, 'clarification-fixture')
             except BaseException as error:
                 errors.append(error)
+            finally:
+                finished.set()
         with patch.dict(CONFIG, {'mode': 'AUTO', 'command_agent': False}), patch.dict(AGENT_STATE, {
                 'clarification_input_enabled': True, 'working_directory_explicit': False}), patch.object(
                 QUESTIONS, 'open', side_effect=notify), patch.object(galam, 'query_with_fallback') as model, contextlib.redirect_stdout(io.StringIO()):
@@ -236,11 +239,13 @@ class ClarificationTests(Workspace):
             worker.start()
             self.assertTrue(shown.wait(3))
             QUESTIONS.submit(str(target), QUESTIONS.active['id'])
-            worker.join(5)
-            if worker.is_alive():
-                from engine.cancellation import cancel_current
-                cancel_current()
-                worker.join(2)
+            try:
+                self.assertTrue(finished.wait(20), 'The replied-to task did not finish')
+            finally:
+                if worker.is_alive():
+                    from engine.cancellation import cancel_current
+                    cancel_current()
+                worker.join(5)
             self.assertFalse(worker.is_alive())
             self.assertEqual(errors, [])
             model.assert_not_called()
