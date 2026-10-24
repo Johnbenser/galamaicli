@@ -1,6 +1,7 @@
 """One lightweight argument contract shared by the existing execution paths."""
 
 TOOLS = {
+    "ask_user": {"question": str, "choices": str, "target": str, "kind": str},
     "make_directory": {"path": str},
     "execute_bash": {"command": str, "reason": str, "background": bool, "readiness_url": str},
     "view_file": {"path": str, "start_line": int, "end_line": int},
@@ -13,6 +14,7 @@ TOOLS = {
     "security_audit": {"directory": str},
 }
 REQUIRED = {
+    "ask_user": ("question",),
     "make_directory": ("path",),
     "execute_bash": ("command",), "view_file": ("path",),
     "write_file": ("path", "content"),
@@ -54,7 +56,7 @@ def validate_arguments(name, arguments):
                 raise ValueError(f"{key} must be a boolean")
         elif not isinstance(value, str):
             raise ValueError(f"{key} must be text")
-        if key in ("path", "command", "action_id", "edit_id") and not value.strip():
+        if key in ("path", "command", "action_id", "edit_id", "question") and not value.strip():
             raise ValueError(f"{key} must not be empty")
         result[key] = value
     return result

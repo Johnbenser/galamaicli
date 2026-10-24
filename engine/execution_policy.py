@@ -56,6 +56,8 @@ def is_safe_read(tool_name, args):
 
 
 def requires_review(mode, tool_name, args):
+    if tool_name == 'ask_user':
+        return False  # A question is not an execution approval.
     from engine.security import review_reason
     if review_reason(tool_name, args):
         return True

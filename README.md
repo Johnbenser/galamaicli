@@ -314,6 +314,16 @@ An action is more than text that looks like a command. Galam parses a complete t
 
 Switch with `/mode review`, `/mode auto`, or `/mode always-proceed`. These are execution policies, not an OS sandbox. Actions run with the permissions of the current terminal process.
 
+### Command references and clarification
+
+Before Bash execution, Galam retrieves relevant facts from the current filesystem and project manifest. It checks known directory, package-script, Python and Node entrypoint proposals, rejecting concrete contradictions with the available project commands. It rechecks changed metadata. Complex shell programs and custom commands remain subject to review and runtime verification; finding a script is not proof that it will succeed. These checks require no additional model call or conversation search.
+
+The `ask_user` Galam Action presents a question above the existing input dock. Reply in `answer>` or select a numbered suggestion. Essential missing context waits for your answer, while safe local discovery can check an explicitly named file or folder. One exact verified match withdraws the unanswered question; ambiguous matches keep waiting. An unnamed folder is never selected merely because it is the only folder nearby. A supplied answer does not approve a later action. Late replies stay as editable drafts instead of becoming queued commands; Esc twice cancels the current task.
+
+Simple navigation and listing requests use verified paths directly. If no target or explicit current directory is available, Galam asks which folder to use. The command worker keeps normal review rules and reports actual output.
+
+Developers can run the offline Propose–Probe–Compose fixture check with `python tools/evaluate_terminal_workflow.py --output /path/to/report.json`. It evaluates command proposals and real disposable read commands without API calls or user-project edits. See [terminal workflow evidence](artifacts/TERMINAL_ACTION_WORKFLOW.md) for coverage and limits.
+
 ### Continuing difficult tasks
 
 `max_iterations` sets checkpoint frequency, never a total step limit. There is **no default task cap on steps, requests, cumulative tokens or duration**. Repeated work receives guidance to change approach using retained evidence; retry counters no longer terminate the task. Unchanged exact file reads reuse their observed results. A known launch recipe stays intact instead of being rediscovered through repeated listings.

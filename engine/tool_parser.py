@@ -523,8 +523,9 @@ def normalize_inbound_actions(text: str, reasoning: str = "") -> List[AgentActio
         return actions
 
     # Format 5: Functional syntax: bash(command='...') or execute_bash(command="...") or view_file(path="...")
-    func_starts = list(re.finditer(r'(?<![\w.])(make_directory|execute_bash|bash|view_file|write_file|replace_file_content|search_files|manage_tasks)\s*\(', text_content))
+    func_starts = list(re.finditer(r'(?<![\w.])(' + '|'.join(sorted(VALID_TOOLS | {'bash'})) + r')\s*\(', text_content))
     positional = {
+        "ask_user": ("question", "choices", "target", "kind"),
         "make_directory": ("path",),
         "execute_bash": ("command", "reason"), "bash": ("command", "reason"),
         "view_file": ("path", "start_line", "end_line"),

@@ -178,7 +178,7 @@ def _simple_listing_receipt(request, event, directory):
             if len(fields) == 9 and fields[0].startswith('d') and fields[8] not in ('.', '..'):
                 folders.append(fields[8])
         if folders:
-            label = requested_paths[-1].rstrip('/') if requested_paths else 'the current directory'
+            label = str(listed_path)
             return f"Folders in `{label}`:\n" + '\n'.join(f'- {name}' for name in folders)
     from engine.result_store import compact_text
     return 'Directory listing completed successfully:\n' + compact_text(result, 2400)
@@ -190,6 +190,8 @@ def completed_simple_request(request, events, pending_checks, directory):
     Complex changes, failures, multi-step requests and pending checks keep the
     existing model-driven continuation. No model name or UI preference is used.
     """
+    events = [event for event in events if not (event['tool'] == 'ask_user' and event['result'].success
+              and event['result'].metadata.get('resolution') in ('answered', 'discovered'))]
     if pending_checks or not events or not all(event["result"].success for event in events):
         return None
     request = _request_body(request)

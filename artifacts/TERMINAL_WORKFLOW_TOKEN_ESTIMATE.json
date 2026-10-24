@@ -1,0 +1,7 @@
+{
+  "estimated_ask_schema_tokens": 189,
+  "estimated_native_contract_added_tokens": 71,
+  "retrieval_model_requests": 0,
+  "waiting_model_poll_requests": 0,
+  "estimator": "Galam conservative character estimator; provider tokenizers vary"
+}

@@ -94,3 +94,23 @@ def observe_existing(url, directory, entrypoints=()):
     except (OSError, ValueError, urllib.error.URLError):
         return None
     return None
+
+
+def reuse_result(url, directory):
+    """One read-only receipt shared by reference checks and the process launcher."""
+    from engine.command_agent import active_agent
+    from engine.action_results import ActionResult
+    agent = active_agent()
+    if not url or not agent or not reuse_allowed(agent.goal):
+        return None
+    inspected = [m['_galam_action']['path'] for m in agent.messages
+                 if m.get('_galam_action', {}).get('tool') == 'view_file'
+                 and m['_galam_action'].get('status') == 'completed' and m['_galam_action'].get('path')]
+    observed = observe_existing(url, directory, inspected)
+    if not observed:
+        return None
+    return ActionResult(f"Already running at {observed['url']}. Verified served bytes against "
+                        f"project files: {', '.join(observed['matched_files'])}. "
+                        "This was a read-only verification: the proposed command was not executed and no process was started. "
+                        "The external service is not owned or controlled by this session.",
+                        verified=True, metadata=observed)

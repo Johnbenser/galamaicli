@@ -14,7 +14,9 @@ def response_contract(native=False, xml=False):
         "then extend working files with focused edits. Honor explicitly empty files. Read before edits; replace unique exact blocks "
         "and preserve unrelated code. Follow review decisions. Run requested/project checks with execute_bash; "
         "a saved file does not prove checks passed. Correct failures using actual errors. Keep unfinished "
-        "requirements explicit. Ask only for essential missing input. Finish with concise changes/checks/failures. "
+        "requirements explicit. Use ask_user for essential missing input; optional target must be a file/folder named by the user. "
+        "Local command-reference checks use live project metadata; correct contradictions, never guess missing scripts. "
+        "Never request secret values in questions. Finish with concise changes/checks/failures. "
         "Retrieve omitted output with read_action_output; undo_file_change only when asked.\n"
     )
     if native:

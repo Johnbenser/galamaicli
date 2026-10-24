@@ -4,6 +4,14 @@ User-facing improvements and bug fixes for Galam.AI. Entries describe implemente
 
 ## Unreleased — connections, workflows and presentation
 
+### Terminal references and live clarification
+
+- Retrieve current path, package-script and Python/Node entrypoint facts before terminal execution. Reject concrete contradictions with declared alternatives; refresh facts after metadata changes. Keep complex commands under existing review and runtime verification. Coalesce repeated command-failure guidance without copying the whole user request again.
+- Add the `ask_user` Galam Action with an inline question, numbered choices and an `answer>` prompt. Safe local discovery can withdraw an unanswered question after one exact verified file/folder match. Ambiguous or unnamed targets wait for the user; answers preserve case and never approve execution.
+- Route answers around the busy-message queue and slash completion. Preserve late replies as drafts, clear questions on cancellation and continue queued work. Simple verified navigation/listing requests avoid model calls and optional planner imports.
+- Preserve read-only existing-service verification before rejecting an unnecessary missing launcher. Reuse still requires served project bytes and assets to match local files; restarts, builds, exact commands and extra requested checks retain their requirements.
+- Added 22 behavioral tests and an offline Propose–Probe–Compose component evaluator. **457 tests passed**, no skips (215.780 seconds). The real supplied navigation/listing sample used only `cd`/`ls` and zero model requests. Details and limits: [terminal workflow evidence](artifacts/TERMINAL_ACTION_WORKFLOW.md).
+
 ### Configure and navigate local model servers
 
 - Restructured only the Local Models flow into Server Connection, Model Profiles, Tuning, and connection testing, with back navigation returning to the relevant local screen.

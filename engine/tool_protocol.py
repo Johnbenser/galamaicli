@@ -5,6 +5,7 @@ from engine.tool_registry import TOOLS, REQUIRED
 
 _UNSUPPORTED = set()
 DESCRIPTIONS = {
+    "ask_user": "Ask for essential missing input; choices is newline-separated. Optional user-named target and kind (file/directory) enable safe discovery while waiting. An exact match withdraws the unanswered question. Answers never grant execution approval; never ask for secrets.",
     "make_directory": "Create a directory and its parents. Never use write_file for folders.",
     "execute_bash": "Run a real shell command after review. For any long-running service use background=true; readiness_url may specify a local HTTP(S)/TCP probe. Do not relaunch a live process just because readiness is pending.",
     "view_file": "Read numbered file lines before editing.",
@@ -80,6 +81,7 @@ def options(endpoint, model, messages, config):
     if contract.complete_scope:
         kinds = {r["kind"] for r in contract.requirements}
         allowed = ({"make_directory"} if "directory" in kinds else set())
+        allowed.add('ask_user')
         if "file" in kinds:
             allowed.update(("write_file", "view_file", "replace_file_content"))
         schemas = [tool for tool in schemas if tool["function"]["name"] in allowed]

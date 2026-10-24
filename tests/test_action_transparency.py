@@ -154,7 +154,7 @@ class ActionLoopTests(fixtures.Workspace):
     def test_clarification_does_not_force_guessed_mutations(self):
         messages, spy = self.run_loop([self.response(text='Which file should I modify?')], 'Modify the file')
         self.assertEqual(self.model_calls, 1)
-        spy.assert_not_called()
+        self.assertEqual([call.args[0] for call in spy.call_args_list], ['ask_user'])
         self.assertIn('Input needed', self.last_display)
 
     def test_verified_outputs_stop_before_speculative_extra_calls_in_same_batch(self):

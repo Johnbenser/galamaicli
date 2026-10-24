@@ -1,0 +1,145 @@
+{
+  "mode": "offline deterministic fixture evaluation",
+  "model_requests": 0,
+  "proposal_count": 14,
+  "probes": [
+    {
+      "proposal": "cd '<fixture>/web project' && npm run develop",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && npm run invented",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 60
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && pnpm run develop",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && pnpm run invented",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 60
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && yarn run develop",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && yarn run invented",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 60
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && bun run develop",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "cd '<fixture>/web project' && bun run invented",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 60
+    },
+    {
+      "proposal": "python worker.py",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "python absent.py",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 37
+    },
+    {
+      "proposal": "ls -la",
+      "expected_allowed": true,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": true,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 0
+    },
+    {
+      "proposal": "mkdir unnecessary",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 30
+    },
+    {
+      "proposal": "npm install",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 30
+    },
+    {
+      "proposal": "cd missing-folder && pwd",
+      "expected_allowed": false,
+      "baseline_shape_check_allowed": true,
+      "candidate_allowed": false,
+      "candidate_correct": true,
+      "correction_estimated_tokens": 35
+    }
+  ],
+  "executions": [
+    {
+      "command": "ls -la",
+      "success": true,
+      "exit_code": 0
+    },
+    {
+      "command": "/data/data/com.termux/files/usr/bin/python worker.py",
+      "success": true,
+      "exit_code": 0
+    },
+    {
+      "command": "cd -- '<fixture>/web project' && pwd",
+      "success": true,
+      "exit_code": 0
+    }
+  ],
+  "baseline_correct": 6,
+  "candidate_correct": 14,
+  "false_rejections": 0,
+  "compose": {
+    "adopt": true,
+    "retained": "Live project command references before execution; existing review stays in control.",
+    "limits": "Known fixture outcomes only. Complex shell programs require runtime diagnosis; these results do not establish performance across real models."
+  },
+  "elapsed_seconds": 0.591
+}

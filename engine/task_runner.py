@@ -254,6 +254,10 @@ def print_server_card(display_cmd: str, port: str, pid: int):
 
 def format_action_step(tool_name: str, args: Dict[str, Any]) -> str:
     """Formats an Antigravity-style action status line."""
+    if tool_name == 'ask_user':
+        from engine.security import redact
+        from engine.transparency import safe_display
+        return '\033[38;5;81m• Asking\033[0m ' + redact(safe_display(args.get('question', '')))
     if tool_name == "execute_bash":
         cmd = args.get("command", "").strip()
         first_line = cmd.splitlines()[0] if cmd else "shell"
@@ -397,7 +401,10 @@ def execute_tool_call(tool_name: str, args: Dict[str, Any], invoking_model: str 
             raise ValueError('Credential files are protected from model file tools. Use settings or edit them locally; do not send secret values to a model.')
         if tool_name == 'search_files' and sensitive_path(resolve_session_path(args.get('directory', '.'))):
             raise ValueError('Credential files are excluded from model searches.')
-        if tool_name == 'security_audit':
+        if tool_name == 'ask_user':
+            from engine.clarification import ask_user
+            result = ask_user(**args)
+        elif tool_name == 'security_audit':
             result = ActionResult(audit_project(resolve_session_path(args.get('directory', '.'))), verified=True)
         elif tool_name == "execute_bash":
             if args.get('background'):
@@ -598,6 +605,10 @@ def resolve_navigation_path(path: str) -> str:
     target = resolve_session_path(expanded)
     if os.path.isdir(target):
         return target
+    if not os.path.isabs(expanded) and '/' in expanded:
+        rooted = os.path.join('/', expanded)
+        if os.path.isdir(rooted):
+            return rooted
     if os.path.isabs(expanded):
         candidate = os.path.normpath(os.path.join(session_directory(), expanded.lstrip("/")))
         if os.path.isdir(candidate):
@@ -672,29 +683,28 @@ def find_project_directory(description: str, start: str = None) -> Optional[str]
     return ranked[0][1]
 
 
-def preflight_shell_command(command: str) -> Tuple[bool, str]:
+def _existing_command_result(command, directory, background=False, readiness_url=''):
+    from engine.command_agent import active_agent
+    if not active_agent() or not (background or GLOBAL_TASK_MANAGER.is_server_command(command)):
+        return None
+    from engine.process_runner import inferred_url
+    from engine.service_observation import reuse_result
+    try:
+        return reuse_result(readiness_url or inferred_url(command, directory, os.environ), directory)
+    except (ValueError, OSError):
+        return None
+
+
+def preflight_shell_command(command: str, request: str = '', background=False, readiness_url='') -> Tuple[bool, str]:
     """Catch guessed navigation and Python entrypoints before asking for approval."""
     prepared, navigation = _prepare_navigation(command.strip())
     if prepared is None:
         return False, navigation
-    directory = navigation or session_directory()
-    for match in re.finditer(r'(?:^|&&|;)\s*(?:python|python3|python3\.\d+)\s+(?!-)([^\s;&|]+\.py)(?=\s|$)', prepared):
-        token = match.group(1).strip("'\"")
-        path = token if os.path.isabs(token) else os.path.join(directory, token)
-        if not os.path.isfile(path):
-            return False, f"Python entry file does not exist: {path}"
-    for match in re.finditer(r'(?:^|&&|;)\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(dev|start|serve|preview)(?=\s|$)', prepared):
-        package_path = os.path.join(directory, "package.json")
-        if not os.path.isfile(package_path):
-            return False, f"package.json does not exist in {directory}"
-        try:
-            with open(package_path, encoding="utf-8") as package_file:
-                scripts = json.load(package_file).get("scripts", {})
-        except (OSError, ValueError, TypeError) as exc:
-            return False, f"Cannot read scripts from {package_path}: {exc}"
-        if match.group(1) not in scripts:
-            return False, f"npm script {match.group(1)!r} does not exist in {package_path}. Available: {', '.join(scripts) or 'none'}"
-    return True, ""
+    from engine.command_reference import assess, feedback
+    reference = assess(prepared, session_directory(), request)
+    if not reference.allowed and _existing_command_result(prepared, navigation or session_directory(), background, readiness_url):
+        return True, ''
+    return reference.allowed, feedback(reference)
 
 
 _LEADING_CD = re.compile(r'^\s*cd\s+(?:--\s+)?(?P<path>\'[^\']*\'|"[^"]*"|[^\s;&|]+)(?=\s*(?:&&|;|$))')
@@ -721,7 +731,21 @@ def _prepare_navigation(command: str):
 
 
 def execute_shell_action(cmd: str, allow_credentials=False, background=False, readiness_url=''):
-    return store_result(as_result(_execute_shell_action_legacy(cmd, allow_credentials, background, readiness_url)))
+    from engine.command_reference import assess, feedback
+    prepared, navigation = _prepare_navigation(cmd.strip())
+    if prepared is None:
+        return store_result(ActionResult(navigation, False, 1, status='failed'))
+    reference = assess(prepared, session_directory())
+    if not reference.allowed:
+        existing = _existing_command_result(prepared, navigation or session_directory(), background, readiness_url)
+        if existing:
+            return store_result(existing)
+        return store_result(ActionResult('Error: ' + feedback(reference), False, 1, status='failed',
+                                         metadata={'command_reference': reference.evidence, 'rejected_before_execution': True}))
+    result = as_result(_execute_shell_action_legacy(cmd, allow_credentials, background, readiness_url))
+    if reference.evidence:
+        result.metadata['command_reference'] = reference.evidence
+    return store_result(result)
 
 
 def _execute_shell_action_legacy(cmd: str, allow_credentials=False, background=False, readiness_url='') -> Tuple[str, bool]:
@@ -770,6 +794,7 @@ def _execute_shell_action_legacy(cmd: str, allow_credentials=False, background=F
             timeout=CONFIG.get('server_startup_timeout', 30))
         if navigation_target and result.is_background:
             AGENT_STATE['working_directory'] = navigation_target
+            AGENT_STATE['working_directory_explicit'] = True
         if result.success and result.is_background and result.metadata.get('url') and result.metadata.get('pid'):
             actual_port = str(urllib.parse.urlsplit(result.metadata['url']).port or '')
             print_server_card(clean_cmd, actual_port, result.metadata['pid'])
@@ -793,6 +818,7 @@ def _execute_shell_action_legacy(cmd: str, allow_credentials=False, background=F
         result_returncode = res.returncode
         if navigation_target and result_returncode == 0:
             AGENT_STATE["working_directory"] = navigation_target
+            AGENT_STATE["working_directory_explicit"] = True
             out = f"[Working directory: {navigation_target}]" + (f"\n{out}" if out.strip() else "")
 
         # Check for curl missing or failing in Termux: fallback to Python curl

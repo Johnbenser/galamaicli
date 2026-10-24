@@ -65,6 +65,11 @@ class AntigravityLexer(Lexer):
 
 kb = KeyBindings()
 
+
+def answering_question():
+    return bool((AGENT_STATE.get('clarification') or AGENT_STATE.get('clarification_draft_id'))
+                and not AGENT_STATE.get('in_btw_mode'))
+
 @kb.add('c-c')
 def handle_ctrl_c(event):
     global LAST_CTRL_C_TIME
@@ -163,7 +168,7 @@ def handle_double_escape(event):
 @kb.add('up')
 def handle_up(event):
     buf = event.current_buffer
-    if buf.text.startswith('/') and ' ' not in buf.text:
+    if not answering_question() and buf.text.startswith('/') and ' ' not in buf.text:
         q = buf.text.lower()
         matching = [c for c, _ in SLASH_COMMANDS if c.lower().startswith(q)]
         if matching:
@@ -175,7 +180,7 @@ def handle_up(event):
 @kb.add('down')
 def handle_down(event):
     buf = event.current_buffer
-    if buf.text.startswith('/') and ' ' not in buf.text:
+    if not answering_question() and buf.text.startswith('/') and ' ' not in buf.text:
         q = buf.text.lower()
         matching = [c for c, _ in SLASH_COMMANDS if c.lower().startswith(q)]
         if matching:
@@ -233,7 +238,7 @@ def get_thought_panel_tokens():
 @kb.add('tab')
 def handle_tab(event):
     buf = event.current_buffer
-    if buf.text.startswith('/') and ' ' not in buf.text:
+    if not answering_question() and buf.text.startswith('/') and ' ' not in buf.text:
         q = buf.text.lower()
         matching = [c for c, _ in SLASH_COMMANDS if c.lower().startswith(q)]
         if matching:
@@ -246,8 +251,16 @@ def handle_tab(event):
 @kb.add('enter')
 def handle_enter(event):
     buf = event.current_buffer
+    if answering_question():
+        # Answers must reach the live input router, even while the worker is
+        # busy discovering paths. Do not autocomplete a folder into a slash command.
+        row = AGENT_STATE.get('clarification') or {}
+        if buf.text.strip():
+            AGENT_STATE['clarification_submitted_id'] = AGENT_STATE.get('clarification_draft_id') or row.get('id')
+        buf.validate_and_handle()
+        return
     cur_text = buf.text.strip().lower()
-    if cur_text.startswith("/") and " " not in cur_text:
+    if not answering_question() and cur_text.startswith("/") and " " not in cur_text:
         matching = [cmd for cmd, _ in SLASH_COMMANDS if cmd.lower().startswith(cur_text)]
         if matching:
             idx = AGENT_STATE.get("slash_idx", 0) % len(matching)
@@ -355,6 +368,8 @@ def get_prompt_text():
 
     if live:
         tokens.extend(get_pending_prompt_tokens(cols))
+        from engine.clarification import question_tokens
+        tokens.extend(question_tokens(cols))
 
     # 2. Top Divider Line
     tokens.append((f"fg:{THEME['border']}", f"{divider}\n"))
@@ -362,6 +377,8 @@ def get_prompt_text():
     # 3. Prompt Arrow
     if AGENT_STATE.get("in_btw_mode", False):
         tokens.append((f"fg:{THEME['shortcut']} bold", "btw> "))
+    elif AGENT_STATE.get('clarification'):
+        tokens.append(('fg:#38bdf8 bold', 'answer> '))
     elif AGENT_STATE.get("review_pending", False):
         prompt_label = AGENT_STATE.get("review_prompt") or "Action [Y/n]> "
         tokens.append(("fg:#facc15 bold", prompt_label))
@@ -391,7 +408,7 @@ def get_bottom_toolbar_tokens():
     tokens = []
 
     # 1. Suggestions Menu
-    if cur_text.startswith("/") and " " not in cur_text:
+    if not answering_question() and cur_text.startswith("/") and " " not in cur_text:
         q = cur_text.lower()
         matching = [(c, d) for c, d in SLASH_COMMANDS if c.lower().startswith(q)]
         if matching:
@@ -480,6 +497,9 @@ prompt_session = PromptSession(
     multiline=False,
     reserve_space_for_menu=0
 )
+
+from engine.clarification import track_answer_draft
+prompt_session.default_buffer.on_text_changed += track_answer_draft
 
 thought_panel = ConditionalContainer(
     Window(FormattedTextControl(get_thought_panel_tokens), dont_extend_height=True),
@@ -663,7 +683,8 @@ def get_interactive_input():
         with patch_stdout(raw=True):
             user_text = prompt_session.prompt(
                 get_prompt_text,
-                bottom_toolbar=get_bottom_toolbar_tokens
+                bottom_toolbar=get_bottom_toolbar_tokens,
+                default=AGENT_STATE.pop('preserved_input_draft', '')
             )
             return user_text.strip()
     except (KeyboardInterrupt, EOFError):

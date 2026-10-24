@@ -41,7 +41,6 @@ from engine.task_runner import (
     resolve_session_path,
     preflight_shell_command,
     workspace_snapshot,
-    find_project_directory,
 )
 from engine.tool_parser import (
     clean_response_text,
@@ -478,18 +477,12 @@ def request_tool_review(cmd_preview: str, title: str = "Approval Required") -> s
 
 def direct_command_for_request(request: str):
     """Handle unambiguous terminal requests without relying on a small model to format tools."""
+    from engine.path_discovery import initial_action
+    plan, action = initial_action(request, session_directory(), AGENT_STATE.get('working_directory_explicit', False))
+    if plan:
+        return action[1]['command'] if action[0] == 'execute_bash' else None
     if request.strip().lower() == "whoami":
         return "whoami"
-    named_listing = re.search(
-        r"\b(?:go|navigate)\s+to\s+(?P<name>.+?)\s+(?:then|and)\s+(?:please\s+)?(?:list|show)\b",
-        request, re.IGNORECASE,
-    )
-    if named_listing:
-        target = find_project_directory(named_listing.group("name"))
-        if target:
-            sys.stdout.write(f"  › Found project: {target}\n")
-            sys.stdout.flush()
-            return f"cd -- {shlex.quote(target)} && ls -la"
     if re.fullmatch(r"\s*(?:(?:and\s+)?now\s+|please\s+|kindly\s+)*"
                     r"(?:run|start|launch)\s+(?:(?:my|the)\s+)?server(?:\s+for\s+me)?[.!]?\s*",
                     request, re.IGNORECASE):
@@ -652,9 +645,22 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             break
     code_change_completed = False
     content_required = requires_content(current_request)
-    direct_command = direct_command_for_request(current_request)
+    from engine.path_discovery import initial_action, command_for, candidates
+    directory_plan, pending_directory_action = initial_action(
+        current_request, session_directory(), AGENT_STATE.get('working_directory_explicit', False))
+    if directory_plan:
+        action_requested = True
+        read_only_scope = True
+        for message in reversed(messages):
+            if message.get('role') == 'user':
+                message['_galam_tool_mode'] = 'auto'
+                break
+        direct_command = (pending_directory_action[1]['command']
+                          if pending_directory_action[0] == 'execute_bash' else None)
+    else:
+        direct_command = direct_command_for_request(current_request)
     inspected_files = {}
-    use_lang_workflow = lang_workflow_available()
+    use_lang_workflow = None  # Local actions should not import the optional planner.
 
     def finish_receipt(receipt):
         messages.append({"role": "assistant", "content": receipt})
@@ -669,7 +675,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
         if AGENT_STATE.get("abort", False):
             break
 
-        local_step = bool(pending_checks or step == 1 and direct_command)
+        local_step = bool(pending_checks or pending_directory_action or step == 1 and direct_command)
         if workflow.begin_round(model=not local_step):
             break
         recovery = workflow.recovery()
@@ -683,11 +689,19 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 check_call = {"id": f"check_{uuid.uuid4().hex}", "type": "function", "function": {
                     "name": "execute_bash", "arguments": json.dumps({"command": command})}}
                 resp_raw = (SimpleNamespace(content="", reasoning="", tool_calls=[check_call]), "verification")
+            elif pending_directory_action:
+                name, arguments = pending_directory_action
+                pending_directory_action = None
+                path_call = {"id": f"path_{uuid.uuid4().hex}", "type": "function", "function": {
+                    "name": name, "arguments": json.dumps(arguments)}}
+                resp_raw = (SimpleNamespace(content="", reasoning="", tool_calls=[path_call]), "local")
             elif step == 1 and direct_command:
                 direct_call = {"id": "direct_user_request", "type": "function", "function": {
                     "name": "execute_bash", "arguments": json.dumps({"command": direct_command})}}
                 resp_raw = (SimpleNamespace(content="", reasoning="", tool_calls=[direct_call]), "direct")
             else:
+                if use_lang_workflow is None:
+                    use_lang_workflow = lang_workflow_available()
                 from engine.command_agent import active_agent
                 if active_agent():
                     active_agent().before_query()
@@ -787,6 +801,10 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             if not tool_calls and not is_post_tool_turn:
                 tool_calls = recover_requested_read(current_request, assistant_content, session_directory())
 
+        if not tool_calls and action_requested and needs_clarification(assistant_content):
+            tool_calls = [{'id': f'ask_{uuid.uuid4().hex}', 'type': 'function', 'function': {
+                'name': 'ask_user', 'arguments': json.dumps({'question': clean_response_text(assistant_content)})}}]
+
         if not tool_calls:
             clean_text = clean_response_text(assistant_content)
             if action_requested and needs_clarification(assistant_content):
@@ -876,6 +894,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
         executed_in_this_step = 0
         rejected_in_this_step = False
         inspection_performed = False
+        asked_in_this_step = False
         for tc in tool_calls:
             if AGENT_STATE.get("abort", False):
                 break
@@ -907,7 +926,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
 
             if read_only_scope:
                 from engine.execution_policy import is_safe_read
-                allowed = is_safe_read(tool_name, args) or (
+                allowed = tool_name == 'ask_user' or is_safe_read(tool_name, args) or (
                     tool_name == 'manage_tasks' and args.get('action', 'list') in ('list','inspect','status'))
                 if not allowed:
                     rejected_in_this_step = True
@@ -929,7 +948,8 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 proposed = str(args.get("command", "")).strip()
                 valid_command, invalid_reason = validate_shell_command(proposed)
                 if valid_command:
-                    valid_command, invalid_reason = preflight_shell_command(proposed)
+                    valid_command, invalid_reason = preflight_shell_command(proposed, request=current_request,
+                        background=args.get('background', False), readiness_url=args.get('readiness_url', ''))
                 if valid_command and code_change_requested and not is_verification and re.search(
                         r"\b(?:touch\s+|sed\s+-i|perl\s+-pi|python(?:3|3\.\d+)?\s+-c|tee\s+|cat\s+>|(?:printf|echo)\s+[^;&|\n]*(?:1>|(?<![0-9])>))",
                         re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", ' DATA ', proposed), re.IGNORECASE):
@@ -939,10 +959,9 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     rejected_in_this_step = True
                     sys.stdout.write(f"  Incomplete: {invalid_reason}\n")
                     sys.stdout.flush()
-                    messages.append({"role": "user", "_galam_internal": True, "content": (
+                    messages.append({"role": "user", "_galam_internal": True, "_galam_guidance": "command_failure", "content": (
                         f"That command cannot run: {invalid_reason}. Stop repeating it. "
-                        "Correct the specific argument or command using actual evidence; choose another supported approach. "
-                        f"User request: {current_request}")})
+                        "Correct it using actual evidence; use ask_user for essential missing input.")})
                     continue
 
             if tool_name in ("write_file", "replace_file_content"):
@@ -1012,10 +1031,12 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             from engine.security import review_reason
             sensitive_command = review_reason(tool_name, args).startswith('Credential')
             progress(f"Preparing {tool_name}" if not requires_review(mode, tool_name, args) else f"Waiting for approval: {tool_name}")
-            cmd_preview = args.get("command", "") if tool_name == "execute_bash" else f"{tool_name}({args.get('path', args.get('query', ''))})"
+            cmd_preview = (args.get('question', '') if tool_name == 'ask_user' else
+                           args.get("command", "") if tool_name == "execute_bash" else f"{tool_name}({args.get('path', args.get('query', ''))})")
             if not requires_review(mode, tool_name, args):
                 reason = "Safe Read Execution" if mode == "AUTO" else "Always-Proceed"
-                render_action_card(cmd_preview, f"{reason}: {tool_name}", mode=mode)
+                if tool_name != 'ask_user':
+                    render_action_card(cmd_preview, f"{reason}: {tool_name}", mode=mode)
             elif mode == "AUTO":
                 choice = request_tool_review(cmd_preview, f"Review Required ({tool_name})")
                 if choice in ("cancel", "c", "/cancel"):
@@ -1078,6 +1099,8 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 if path in inspected_files:
                     args["_expected_hash"] = inspected_files[path]
             cache_key = workflow.read_key(tool_name, args, session_directory())
+            if tool_name == 'ask_user' and args.get('target') and args['target'] not in current_request:
+                args = dict(args, target='')  # Discovery targets must come from this request.
             action_result = workflow.cache.get(cache_key) if cache_key else None
             if action_result is None:
                 action_result = as_result(execute_tool_call(tool_name, args, invoking_model=active_model))
@@ -1089,7 +1112,12 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
             action_events.append({"tool": tool_name, "args": dict(args), "result": action_result,
                                   "verification": is_verification})
             out, is_bg = action_result
-            executed_commands.add(execution_key)
+            if action_result.metadata.get('command_reference'):
+                from engine.security import redact
+                references = '; '.join(action_result.metadata['command_reference'][-2:])
+                sys.stdout.write('  › Command check: ' + redact(references) + '\n')
+            if tool_name != 'ask_user':
+                executed_commands.add(execution_key)
             if (action_result.success and tool_name in ("write_file", "replace_file_content", "undo_file_change", "make_directory")
                     and action_result.metadata.get("changed", True)):
                 workspace_revision += 1
@@ -1119,6 +1147,8 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     card_title = f"File Write: {os.path.basename(args.get('path', 'file'))}"
                 elif tool_name == "execute_bash":
                     card_title = "Command Output"
+                elif tool_name == 'ask_user':
+                    card_title = 'Input needed' if action_result.status == 'needs_input' else 'Clarification'
                 else:
                     card_title = f"Result ({tool_name})"
                 listing_command = tool_name == "execute_bash" and bool(re.search(
@@ -1144,7 +1174,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 code_change_completed = (not content_required or
                                          os.path.isfile(target) and bool(Path(target).read_text(encoding="utf-8").strip()))
             last_tool_result = (tool_name, clean_out, not has_error, is_bg)
-            result_label = "Success" if not has_error else "Incomplete"
+            result_label = "Input needed" if action_result.status == 'needs_input' else "Success" if not has_error else "Incomplete"
             summary_line = action_acknowledgment(tool_name, args, action_result)
             progress(summary_line)
             sys.stdout.write(f"  \033[1;{'32' if not has_error else '33'}m{result_label}: {tool_name}\033[0m\n")
@@ -1161,6 +1191,8 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                     status_instruction = ("Status: File operation completed successfully. "
                                           "Only the checks explicitly listed in the result have passed. "
                                           "Run any remaining project verification before claiming the task is fully verified.")
+                if tool_name == 'ask_user':
+                    status_instruction = 'Status: Clarification only; no requested file or terminal operation has been completed by asking.'
 
             clean_out = re.sub(r"\x1b\[[0-9;]*m", "", clean_out)
             observation_feedback = (
@@ -1175,9 +1207,27 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 "_galam_action": {"id": action_result.action_id, "status": action_result.status,
                                   "exit_code": action_result.exit_code, "output_path": action_result.output_path,
                                   "tool": tool_name, "path": action_result.metadata.get('path'),
+                                  "command_reference": action_result.metadata.get('command_reference'),
                                   "source_id": action_result.metadata.get('source_id'),
                                   "content_hash": action_result.metadata.get('content_hash')}
             })
+            if tool_name == 'ask_user':
+                asked_in_this_step = True
+                if action_result.status == 'needs_input':
+                    AGENT_STATE['task_outcome'] = 'incomplete'
+                    finish_receipt('Input needed: ' + action_result.output)
+                    return
+                if directory_plan and action_result.success:
+                    answer = action_result.metadata.get('path') or action_result.metadata.get('answer', '')
+                    paths = candidates(answer, session_directory())
+                    if len(paths) == 1:
+                        direct_command = command_for(directory_plan['operation'], paths[0])
+                        pending_directory_action = ('execute_bash', {'command': direct_command})
+                    else:
+                        pending_directory_action = ('ask_user', {
+                            'question': 'That answer did not identify one existing folder. Enter its full path.',
+                            'choices': '\n'.join(paths[:5])})
+                continue
             executed_in_this_step += 1
             if command_agent and command_agent.ready and not pending_checks:
                 command_agent.entry['startup_complete'] = True
@@ -1199,7 +1249,7 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
                 except Exception:
                     pass
 
-        if inspection_performed:
+        if inspection_performed or asked_in_this_step:
             continue
 
         if executed_in_this_step and not AGENT_STATE.get("abort", False):
@@ -1213,6 +1263,10 @@ def _run_agent_loop(messages, conversation_id, max_steps=None, checkpoint=None, 
 
         if direct_command and last_tool_result and last_tool_result[2] and not (code_change_requested and not code_change_completed):
             tool_name, output, succeeded, _ = last_tool_result
+            if directory_plan:
+                finish_receipt(_tool_completion_summary(last_tool_result))
+                completed = True
+                break
             sys.stdout.write(f"  {'Success' if succeeded else 'Incomplete'}: {current_request}\n")
             sys.stdout.write(f"  Summary: {_tool_completion_summary(last_tool_result)}\n\n")
             sys.stdout.flush()
@@ -1342,6 +1396,7 @@ def main():
     dock_layout.CLI_OPENED_AT = time.monotonic()
 
     worker = threading.Thread(target=agent_worker_loop, daemon=True)
+    AGENT_STATE['clarification_input_enabled'] = True
     worker.start()
     AGENT_STATE['enqueue_prompt'] = lambda text: TASK_QUEUE.enqueue(text, conversation_id, messages, staged=True)
 
@@ -1369,11 +1424,23 @@ def main():
                     AGENT_STATE["review_event"].set()
                 continue
 
+            submitted_question_id = AGENT_STATE.pop('clarification_submitted_id', None)
+            draft_question_id = AGENT_STATE.pop('clarification_draft_id', None)
             if not user_input:
                 continue
 
             first_token = user_input.split()[0].lower() if user_input.strip() else ""
             KNOWN_CMDS = {"/add-dir", "/agents", "/artifact", "/btw", "/cancel", "/changelog", "/clear", "/edit", "/exit", "/help", "/local", "/model", "/mode", "/plan", "/settings", "/status", "/tasks", "/queue"}
+
+            if not AGENT_STATE.get('in_btw_mode') and first_token not in KNOWN_CMDS:
+                from engine.clarification import QUESTIONS
+                answer_status = QUESTIONS.submit(user_input, submitted_question_id or draft_question_id)
+                if answer_status == 'answered':
+                    continue
+                if answer_status == 'expired':
+                    AGENT_STATE['preserved_input_draft'] = user_input
+                    print('The question was already resolved. Your late reply remains in the input field; edit or submit it as a new request.')
+                    continue
 
             if first_token in KNOWN_CMDS:
                 handle_slash_command(user_input, messages, conversation_id)
@@ -1428,6 +1495,7 @@ def main():
 
     finally:
         close_btw()
+        AGENT_STATE['clarification_input_enabled'] = False
         AGENT_STATE.pop('enqueue_prompt', None)
         cancel_current()
         TASK_QUEUE.clear()
